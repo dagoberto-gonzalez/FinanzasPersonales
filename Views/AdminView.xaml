@@ -1,0 +1,201 @@
+<UserControl x:Class="FinanzasPersonales.Views.AdminView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BgBrush}">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="32,28" MaxWidth="820">
+
+            <TextBlock Text="Panel de Administración" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
+            <TextBlock Text="Gestiona usuarios y configuración global de la aplicación."
+                       Foreground="{StaticResource TextMutedBrush}" FontSize="13" Margin="0,0,0,28"/>
+
+            <!-- ── Usuarios ── -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Usuarios registrados" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Text="Activa/desactiva cuentas o elimínalas junto con todos sus datos."
+                               Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="{Binding ErrorUsuarios}"
+                               Foreground="{StaticResource RedBrush}"
+                               FontSize="12" Margin="0,0,0,12"
+                               Visibility="{Binding ErrorUsuariosVisibility}"/>
+
+                    <!-- Cabecera -->
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="80"/>
+                            <ColumnDefinition Width="80"/>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="80"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Usuario" Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="1" Text="Rol"     Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="2" Text="Estado"  Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="3" Text="Creado"  Foreground="{StaticResource TextMutedBrush}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="4" Text=""         />
+                        <TextBlock Grid.Column="5" Text=""         />
+                    </Grid>
+
+                    <ItemsControl ItemsSource="{Binding Usuarios}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#2A2D3E" CornerRadius="8" Padding="12,10" Margin="0,0,0,5">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="80"/>
+                                            <ColumnDefinition Width="80"/>
+                                            <ColumnDefinition Width="120"/>
+                                            <ColumnDefinition Width="90"/>
+                                            <ColumnDefinition Width="80"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="{Binding NombreUsuario}"
+                                                   FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
+
+                                        <!-- Badge rol -->
+                                        <Border Grid.Column="1" CornerRadius="4" Padding="6,2" HorizontalAlignment="Left"
+                                                VerticalAlignment="Center">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="#2A2D4E"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Rol}" Value="Admin">
+                                                            <Setter Property="Background" Value="#3D2A6E"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <TextBlock Text="{Binding Rol}" FontSize="11" FontWeight="SemiBold">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Rol}" Value="Admin">
+                                                                <Setter Property="Foreground" Value="{StaticResource AccentLightBrush}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Border>
+
+                                        <!-- Estado -->
+                                        <TextBlock Grid.Column="2" FontSize="12" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text"       Value="Activo"/>
+                                                    <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Activo}" Value="False">
+                                                            <Setter Property="Text"       Value="Inactivo"/>
+                                                            <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding FechaCreacion, StringFormat='{}{0:dd/MM/yyyy}'}"
+                                                   Foreground="{StaticResource TextMutedBrush}"
+                                                   FontSize="12" VerticalAlignment="Center"/>
+
+                                        <!-- Toggle activo -->
+                                        <Button Grid.Column="4"
+                                                Padding="8,4" VerticalAlignment="Center"
+                                                Command="{Binding DataContext.ToggleActivoCommand,
+                                                    RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}">
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+                                                    <Setter Property="Content" Value="Desactivar"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Activo}" Value="False">
+                                                            <Setter Property="Content" Value="Activar"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+
+                                        <!-- Eliminar -->
+                                        <Button Grid.Column="5"
+                                                Content="Eliminar"
+                                                Style="{StaticResource DangerButton}"
+                                                Padding="8,4" VerticalAlignment="Center"
+                                                Command="{Binding DataContext.EliminarUsuarioCommand,
+                                                    RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                </StackPanel>
+            </Border>
+
+            <!-- ── Configuración global ── -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Configuración global" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Text="Estos valores aplican para toda la aplicación."
+                               Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,20"/>
+
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="14"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0"
+                                   Text="Símbolo de moneda"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="12" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="0" Grid.Column="1"
+                                 Text="{Binding Moneda, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="ej: ₡, $, €"
+                                 MaxLength="5"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0"
+                                   Text="Máximo de usuarios"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="12" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="2" Grid.Column="1"
+                                 Text="{Binding MaxUsuarios, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="1-999"/>
+                    </Grid>
+
+                    <Button Content="Guardar configuración"
+                            Style="{StaticResource PrimaryButton}"
+                            Command="{Binding GuardarConfigCommand}"
+                            HorizontalAlignment="Left"
+                            Padding="24,10"/>
+
+                    <TextBlock Text="{Binding ErrorConfig}"
+                               Foreground="{StaticResource RedBrush}"
+                               FontSize="12" Margin="0,10,0,0"
+                               Visibility="{Binding ErrorConfigVisibility}"/>
+
+                    <TextBlock Text="{Binding OkConfig}"
+                               Foreground="{StaticResource GreenBrush}"
+                               FontSize="12" Margin="0,10,0,0"
+                               TextWrapping="Wrap"
+                               Visibility="{Binding OkConfigVisibility}"/>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

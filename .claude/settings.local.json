@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(pandoc --version)",
+      "Bash(iscc --version)",
+      "Bash(where iscc:*)",
+      "Bash(dotnet --list-sdks)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Bash(dotnet tool:*)",
+      "Bash(ls \"F:/Claude/FinanzasPersonales\"/*.ico)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet run:*)",
+      "Bash(dotnet publish:*)",
+      "Bash(dotnet add:*)",
+      "Bash(python3 -c ':*)",
+      "Bash(powershell -Command ':*)",
+      "Skill(qa)",
+      "Bash(awk NR>=409 && NR<=421 {print NR\": \"$0}:*)",
+      "Bash(awk NR>=499 && NR<=516 {print NR\": \"$0}:*)",
+      "Bash(git remote *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

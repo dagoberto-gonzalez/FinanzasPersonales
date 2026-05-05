@@ -1,0 +1,269 @@
+<UserControl x:Class="FinanzasPersonales.Views.ReportesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:FinanzasPersonales.Controls"
+             Background="{StaticResource BgBrush}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="32,28">
+
+            <TextBlock Text="Reportes" FontSize="26" FontWeight="Bold" Margin="0,0,0,24"/>
+
+            <!-- Gráfica de barras mensual -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,24">
+                <StackPanel>
+                    <TextBlock Text="Ingresos vs Gastos — últimos 12 meses"
+                               FontSize="15" FontWeight="SemiBold" Margin="0,0,0,16"/>
+                    <controls:BarChartControl Items="{Binding DatosMensuales}" Height="260"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Resumen anual -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,24">
+                <StackPanel>
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Resumen Anual" FontSize="15" FontWeight="SemiBold"/>
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AniosDisponibles}"
+                                  SelectedItem="{Binding AnioSeleccionado}"
+                                  Width="90"/>
+                    </Grid>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="INGRESOS" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding IngresosAnioTexto}"
+                                       Foreground="{StaticResource GreenBrush}"
+                                       FontSize="22" FontWeight="Bold" Margin="0,8,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="GASTOS" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding GastosAnioTexto}"
+                                       Foreground="{StaticResource RedBrush}"
+                                       FontSize="22" FontWeight="Bold" Margin="0,8,0,0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="BALANCE" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding BalanceAnioTexto}"
+                                       FontSize="22" FontWeight="Bold" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Comparación de meses -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,24">
+                <StackPanel>
+                    <TextBlock Text="Comparar meses" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,16"/>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="32"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Mes A -->
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Mes A" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,8"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="80"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox ItemsSource="{Binding NombresMeses}"
+                                          SelectedIndex="{Binding MesIndexA}"/>
+                                <TextBox Grid.Column="2"
+                                         Text="{Binding AnioA, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="Año"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <TextBlock Grid.Column="1" Text="vs"
+                                   VerticalAlignment="Bottom" Margin="0,0,0,4"
+                                   HorizontalAlignment="Center"
+                                   Foreground="{StaticResource TextMutedBrush}" FontSize="16"/>
+
+                        <!-- Mes B -->
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Mes B" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,8"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="80"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox ItemsSource="{Binding NombresMeses}"
+                                          SelectedIndex="{Binding MesIndexB}"/>
+                                <TextBox Grid.Column="2"
+                                         Text="{Binding AnioB, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="Año"/>
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Resultados comparación -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Background="#2A2D3E" CornerRadius="8" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="Mes A" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Ingresos" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding IngresosATexto}"
+                                               Foreground="{StaticResource GreenBrush}"/>
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Gastos" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding GastosATexto}"
+                                               Foreground="{StaticResource RedBrush}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2" Background="#2A2D3E" CornerRadius="8" Padding="16">
+                            <StackPanel>
+                                <TextBlock Text="Mes B" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Ingresos" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding IngresosBTexto}"
+                                               Foreground="{StaticResource GreenBrush}"/>
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Gastos" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding GastosBTexto}"
+                                               Foreground="{StaticResource RedBrush}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Historial de cierres mensuales -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,24">
+                <StackPanel>
+                    <TextBlock Text="Historial de cierres mensuales"
+                               FontSize="15" FontWeight="SemiBold" Margin="0,0,0,16"/>
+
+                    <TextBlock Text="Aún no hay meses cerrados."
+                               Foreground="{StaticResource TextMutedBrush}"
+                               FontSize="13"
+                               Visibility="{Binding SinResumenesVisibility}"/>
+
+                    <DataGrid ItemsSource="{Binding ResumenesMensuales}"
+                              Visibility="{Binding ConResumenesVisibility}"
+                              IsReadOnly="True">
+                        <DataGrid.Columns>
+
+                            <DataGridTextColumn Header="PERÍODO"
+                                                Binding="{Binding MesLabel}"
+                                                Width="150"/>
+
+                            <DataGridTemplateColumn Header="INGRESOS" Width="130">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Ingresos, StringFormat='₡{0:N0}'}"
+                                                   Foreground="{StaticResource GreenBrush}"
+                                                   FontWeight="SemiBold"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTemplateColumn Header="GASTOS" Width="130">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Gastos, StringFormat='₡{0:N0}'}"
+                                                   Foreground="{StaticResource RedBrush}"
+                                                   FontWeight="SemiBold"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTextColumn Header="BALANCE MES"
+                                                Binding="{Binding Balance, StringFormat='₡{0:N0}'}"
+                                                Width="130"/>
+
+                            <DataGridTextColumn Header="BALANCE ACUM."
+                                                Binding="{Binding BalanceAcumulado, StringFormat='₡{0:N0}'}"
+                                                Width="140"/>
+
+                            <DataGridTextColumn Header="TRANS."
+                                                Binding="{Binding NumTransacciones}"
+                                                Width="70"/>
+
+                            <DataGridTextColumn Header="LAB."
+                                                Binding="{Binding PeriodoLaboralTexto}"
+                                                Width="55"/>
+
+                            <DataGridTextColumn Header="FECHA CIERRE"
+                                                Binding="{Binding FechaCierre}"
+                                                Width="*"/>
+
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+            </Border>
+
+            <!-- Exportar PDF -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Exportar reporte" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock Text="Genera un PDF con el resumen del año seleccionado y lo abre automáticamente."
+                               Foreground="{StaticResource TextMutedBrush}" FontSize="13" Margin="0,0,0,16"/>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Exportar PDF"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding ExportarPdfCommand}"
+                                Padding="22,10"/>
+                        <TextBlock Text="{Binding EstadoExportar}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="16,0,0,0" FontSize="12"
+                                   TextWrapping="Wrap" MaxWidth="400"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

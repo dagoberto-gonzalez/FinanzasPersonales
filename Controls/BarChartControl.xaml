@@ -1,0 +1,14 @@
+<UserControl x:Class="FinanzasPersonales.Controls.BarChartControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinHeight="200">
+    <Grid>
+        <Canvas x:Name="ChartCanvas" ClipToBounds="True"/>
+        <TextBlock x:Name="EmptyText"
+                   Text="Sin datos"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   Foreground="#6C7086"
+                   Visibility="Collapsed"/>
+    </Grid>
+</UserControl>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background rounded square — AccentBrush #7C3AED -->
+  <rect width="64" height="64" rx="14" fill="#7C3AED"/>
+
+  <!-- Ascending bar chart (left → right, shortest → tallest) -->
+  <rect x="9"  y="43" width="13" height="12" rx="2.5" fill="#FFFFFF" fill-opacity="0.40"/>
+  <rect x="26" y="31" width="13" height="24" rx="2.5" fill="#FFFFFF" fill-opacity="0.65"/>
+  <rect x="43" y="17" width="13" height="38" rx="2.5" fill="#FFFFFF"/>
+
+  <!-- Upward trend line connecting bar tops -->
+  <polyline points="15.5,41  32.5,29  49.5,15"
+            stroke="white" stroke-width="2" stroke-opacity="0.85"
+            fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Peak dot -->
+  <circle cx="49.5" cy="15" r="3" fill="white" fill-opacity="0.9"/>
+</svg>

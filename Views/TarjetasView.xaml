@@ -1,0 +1,358 @@
+<UserControl x:Class="FinanzasPersonales.Views.TarjetasView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BgBrush}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="32,28">
+
+            <TextBlock Text="Tarjetas de Crédito" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
+            <TextBlock Text="Haz clic en una tarjeta para ver detalles, editarla o registrar un pago."
+                       Foreground="{StaticResource TextMutedBrush}" FontSize="13" Margin="0,0,0,24"/>
+
+            <!-- ── Formulario nueva tarjeta ──────────────────────────────────── -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,24">
+                <StackPanel>
+                    <TextBlock Text="Agregar nueva tarjeta" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="80"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="80"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Nombre" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding NuevaNombre, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="Ej. BAC Visa Clásica"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Límite de crédito" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding NuevaLimite, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="₡ Límite"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Día cierre" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding NuevaCierre, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="1-31"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="6">
+                            <TextBlock Text="Día pago" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding NuevaPago, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="1-31"/>
+                        </StackPanel>
+                        <Button Grid.Column="8"
+                                Content="Agregar"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding AgregarTarjetaCommand}"
+                                VerticalAlignment="Bottom"
+                                Padding="20,11"/>
+                    </Grid>
+
+                    <TextBlock Text="{Binding NuevaError}"
+                               Foreground="{StaticResource RedBrush}"
+                               FontSize="12" Margin="0,10,0,0"
+                               Visibility="{Binding NuevaErrorVisibility}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ── Lista de tarjetas ─────────────────────────────────────────── -->
+            <ListBox ItemsSource="{Binding Tarjetas}"
+                     SelectedItem="{Binding Seleccionada}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Margin="0,0,0,24">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel/>
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="Margin"  Value="0,0,16,16"/>
+                        <EventSetter Event="PreviewMouseLeftButtonDown"
+                                     Handler="ListBoxItem_PreviewMouseLeftButtonDown"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="bd"
+                                            Background="{StaticResource CardBrush}"
+                                            BorderBrush="{StaticResource BorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="12"
+                                            Padding="20"
+                                            Width="300"
+                                            Cursor="Hand">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                            <Setter TargetName="bd" Property="Background"  Value="#2D1F5E"/>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="bd" Property="BorderBrush" Value="#5A5A7A"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel>
+                            <!-- Nombre tarjeta -->
+                            <TextBlock Text="{Binding Nombre}"
+                                       FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+
+                            <!-- Período actual -->
+                            <TextBlock Text="{Binding PeriodoTexto}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="10" Margin="0,0,0,12"/>
+
+                            <!-- Barra de uso -->
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Uso del crédito"
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="11"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding PorcentajeUso, StringFormat='{}{0:N0}%'}"
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="11"/>
+                            </Grid>
+                            <ProgressBar Value="{Binding PorcentajeUso, Mode=OneWay}"
+                                         Maximum="100" Height="6" Margin="0,0,0,14"/>
+
+                            <!-- Montos -->
+                            <Grid Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="LÍMITE" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                    <TextBlock Text="{Binding LimiteCredito, StringFormat='₡{0:N0}'}"
+                                               FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="USADO" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                    <TextBlock Text="{Binding SaldoUsado, StringFormat='₡{0:N0}'}"
+                                               Foreground="{StaticResource RedBrush}" FontWeight="SemiBold" FontSize="12"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="DISPONIBLE" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                    <TextBlock Text="{Binding SaldoDisponible, StringFormat='₡{0:N0}'}"
+                                               Foreground="{StaticResource GreenBrush}" FontWeight="SemiBold" FontSize="12"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Fechas -->
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="PRÓXIMO CIERRE" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                    <TextBlock Text="{Binding DiasHastaCierre, StringFormat='En {0} días'}"
+                                               FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="LÍMITE DE PAGO" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                    <TextBlock Text="{Binding FechaLimitePagoTexto}"
+                                               FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- ── Panel inferior: edición + abono + movimientos ──────────────── -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="300"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Columna izquierda: editar + abono -->
+                <StackPanel Grid.Column="0">
+
+                    <!-- Editar tarjeta -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="Editar tarjeta" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14"/>
+
+                            <!-- Sin selección -->
+                            <TextBlock Text="Selecciona una tarjeta arriba."
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="12">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HaySeleccion}" Value="False">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <!-- Con selección -->
+                            <StackPanel Visibility="{Binding HaySeleccion, Converter={StaticResource BoolToVis}}">
+
+                                <TextBlock Text="Nombre" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                                <TextBox Text="{Binding EditNombre, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="Nombre de la tarjeta" Margin="0,0,0,10"/>
+
+                                <TextBlock Text="Límite de crédito" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                                <TextBox Text="{Binding EditLimite, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="₡ Límite" Margin="0,0,0,10"/>
+
+                                <TextBlock Text="Día de cierre" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                                <TextBox Text="{Binding EditCierre, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="1-31" Margin="0,0,0,10"/>
+
+                                <TextBlock Text="Día de pago" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                                <TextBox Text="{Binding EditPago, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="1-31" Margin="0,0,0,14"/>
+
+                                <Button Content="Guardar cambios"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Command="{Binding GuardarCambiosCommand}"
+                                        Margin="0,0,0,8"/>
+
+                                <Button Content="Eliminar tarjeta"
+                                        Style="{StaticResource DangerButton}"
+                                        Command="{Binding EliminarTarjetaCommand}"
+                                        CommandParameter="{Binding Seleccionada}"
+                                        Padding="16,9"/>
+
+                                <TextBlock Text="{Binding MensajeError}"
+                                           Foreground="{StaticResource RedBrush}"
+                                           FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"
+                                           Visibility="{Binding MensajeErrorVisibility}"/>
+                                <TextBlock Text="{Binding MensajeOk}"
+                                           Foreground="{StaticResource GreenBrush}"
+                                           FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"
+                                           Visibility="{Binding MensajeOkVisibility}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Registrar pago a la tarjeta -->
+                    <Border Style="{StaticResource Card}"
+                            Visibility="{Binding HaySeleccion, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="Registrar pago" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBlock Foreground="{StaticResource TextMutedBrush}" FontSize="12"
+                                       TextWrapping="Wrap" Margin="0,0,0,14">
+                                <Run Text="Saldo pendiente: "/>
+                                <Run Text="{Binding Seleccionada.SaldoUsado, StringFormat='₡{0:N0}'}"
+                                     Foreground="{StaticResource RedBrush}" FontWeight="SemiBold"/>
+                            </TextBlock>
+
+                            <TextBlock Text="Monto del pago" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding AbonoMonto, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="₡ Monto" Margin="0,0,0,12"/>
+
+                            <Button Content="Registrar pago"
+                                    Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding AbonarCommand}"/>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+
+                <!-- Movimientos de la tarjeta -->
+                <Border Grid.Column="2" Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Movimientos del período actual"
+                                   FontSize="15" FontWeight="SemiBold" Margin="0,0,0,16"/>
+
+                        <DataGrid ItemsSource="{Binding Movimientos}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  MaxHeight="420"
+                                  ColumnHeaderHeight="36"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  Visibility="{Binding HaySeleccion, Converter={StaticResource BoolToVis}}">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Fecha"
+                                                    Binding="{Binding Fecha, StringFormat='dd/MM/yyyy'}"
+                                                    Width="110">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Padding" Value="6,0"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Descripción"
+                                                    Binding="{Binding EtiquetaDisplay}"
+                                                    Width="*"
+                                                    MinWidth="180">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Padding"     Value="6,0"/>
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Categoría"
+                                                    Binding="{Binding Categoria}"
+                                                    Width="150">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Padding" Value="6,0"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="Monto"
+                                                    Binding="{Binding Monto, StringFormat='₡{0:N0}'}"
+                                                    Width="140">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Padding"           Value="6,0"/>
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <TextBlock Text="Selecciona una tarjeta para ver sus movimientos."
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="13" Margin="0,8,0,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HaySeleccion}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

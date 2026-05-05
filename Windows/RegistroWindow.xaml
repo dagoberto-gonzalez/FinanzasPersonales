@@ -1,0 +1,107 @@
+<Window x:Class="FinanzasPersonales.Windows.RegistroWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DMT Finance — Crear cuenta"
+        Icon="/Assets/dmt-logo.png"
+        Width="440" Height="640"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="#1E1E2E">
+
+    <Grid>
+        <Border HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Width="360"
+                Background="#24273A"
+                BorderBrush="#3A3D52"
+                BorderThickness="1"
+                CornerRadius="16"
+                Padding="36,40">
+            <StackPanel>
+
+                <!-- Logo DMT Finance -->
+                <Viewbox Width="64" Height="64" HorizontalAlignment="Center">
+                    <Canvas Width="64" Height="64">
+                        <Rectangle Width="64" Height="64" RadiusX="14" RadiusY="14" Fill="#7C3AED"/>
+                        <Rectangle Canvas.Left="9"  Canvas.Top="43" Width="13" Height="12" RadiusX="2.5" RadiusY="2.5" Fill="#66FFFFFF"/>
+                        <Rectangle Canvas.Left="26" Canvas.Top="31" Width="13" Height="24" RadiusX="2.5" RadiusY="2.5" Fill="#A6FFFFFF"/>
+                        <Rectangle Canvas.Left="43" Canvas.Top="17" Width="13" Height="38" RadiusX="2.5" RadiusY="2.5" Fill="White"/>
+                        <Polyline Points="15.5,41 32.5,29 49.5,15"
+                                  Stroke="White" StrokeThickness="2" Opacity="0.85"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"/>
+                        <Ellipse Canvas.Left="46.5" Canvas.Top="12" Width="6" Height="6" Fill="White" Opacity="0.9"/>
+                    </Canvas>
+                </Viewbox>
+                <TextBlock Text="Crear cuenta"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           Foreground="#CDD6F4"
+                           HorizontalAlignment="Center"
+                           Margin="0,10,0,4"/>
+                <TextBlock Text="Completa los campos para registrarte"
+                           FontSize="13"
+                           Foreground="#6C7086"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,32"/>
+
+                <!-- Nombre de usuario -->
+                <TextBlock Text="Nombre de usuario"
+                           Foreground="#6C7086"
+                           FontSize="12"
+                           Margin="0,0,0,6"/>
+                <TextBox x:Name="TxtNombre"
+                         Text="{Binding NombreUsuario, UpdateSourceTrigger=PropertyChanged}"
+                         Tag="Mínimo 3 caracteres"
+                         Margin="0,0,0,16"
+                         KeyDown="Input_KeyDown"/>
+
+                <!-- Contraseña -->
+                <TextBlock Text="Contraseña"
+                           Foreground="#6C7086"
+                           FontSize="12"
+                           Margin="0,0,0,6"/>
+                <PasswordBox x:Name="PwdPassword"
+                             Margin="0,0,0,4"
+                             PasswordChanged="PwdPassword_Changed"
+                             KeyDown="Input_KeyDown"/>
+                <TextBlock Text="Mínimo 6 caracteres"
+                           Foreground="#6C7086"
+                           FontSize="11"
+                           Margin="0,0,0,16"/>
+
+                <!-- Confirmar contraseña -->
+                <TextBlock Text="Confirmar contraseña"
+                           Foreground="#6C7086"
+                           FontSize="12"
+                           Margin="0,0,0,6"/>
+                <PasswordBox x:Name="PwdConfirmar"
+                             Margin="0,0,0,8"
+                             PasswordChanged="PwdConfirmar_Changed"
+                             KeyDown="Input_KeyDown"/>
+
+                <!-- Error -->
+                <TextBlock Text="{Binding MensajeError}"
+                           Foreground="#F38BA8"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,20"
+                           Visibility="{Binding MensajeErrorVisibility}"/>
+
+                <!-- Botones -->
+                <Button Content="Crear cuenta"
+                        Style="{StaticResource PrimaryButton}"
+                        Command="{Binding RegistrarCommand}"
+                        Height="42"
+                        FontSize="15"
+                        Margin="0,0,0,10"/>
+
+                <Button Content="Cancelar"
+                        Style="{StaticResource SecondaryButton}"
+                        Height="36"
+                        Click="BtnCancelar_Click"/>
+
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
