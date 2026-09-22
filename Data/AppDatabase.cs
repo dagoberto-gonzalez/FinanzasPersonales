@@ -10,13 +10,34 @@ public class AppDatabase
 {
     private readonly string _cs;
 
-    public AppDatabase()
+    /// <summary>Ruta del archivo SQLite en uso (útil para diagnóstico y pruebas).</summary>
+    public string RutaArchivo { get; }
+
+    /// <summary>
+    /// Abre (o crea) la base de datos.
+    /// </summary>
+    /// <param name="dbPath">
+    /// Ruta completa del archivo .db. Si es <c>null</c> se usa la ubicación de producción
+    /// (<c>%APPDATA%\FinanzasPersonales\finanzas.db</c>). Las pruebas pasan una ruta temporal.
+    /// </param>
+    public AppDatabase(string? dbPath = null)
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "FinanzasPersonales");
-        Directory.CreateDirectory(dir);
-        _cs = $"Data Source={Path.Combine(dir, "finanzas.db")}";
+        if (string.IsNullOrWhiteSpace(dbPath))
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "FinanzasPersonales");
+            Directory.CreateDirectory(dir);
+            dbPath = Path.Combine(dir, "finanzas.db");
+        }
+        else
+        {
+            var dir = Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        }
+
+        RutaArchivo = dbPath;
+        _cs         = $"Data Source={dbPath}";
         Inicializar();
     }
 
@@ -2077,5 +2098,215 @@ public class AppDatabase
             tr.Commit();
         }
         catch { tr.Rollback(); throw; }
+    }
+
+    // ── Verificación de integridad ────────────────────────────────────────────
+
+    /// <summary>
+    /// Recorre la base buscando discrepancias entre las distintas fuentes de verdad
+    /// (Transacciones, Cuentas.SaldoActual, TarjetasCredito.SaldoUsado, PagosMensuales…)
+    /// y referencias rotas. Es de solo lectura: nunca modifica datos.
+    /// Una base sana devuelve una lista vacía.
+    /// </summary>
+    public List<ProblemaIntegridad> VerificarIntegridad()
+    {
+        using var conn = Abrir();
+        var problemas = new List<ProblemaIntegridad>();
+
+        void Add(SeveridadProblema sev, string area, string desc, string detalle = "", int cant = 1) =>
+            problemas.Add(new ProblemaIntegridad
+            {
+                Severidad = sev, Area = area, Descripcion = desc, Detalle = detalle, Cantidad = cant
+            });
+
+        void Contar(string sql, SeveridadProblema sev, string area, string desc, string detalle = "")
+        {
+            var n = (int)EjecutarScalar<long>(conn, sql);
+            if (n > 0) Add(sev, area, desc, detalle, n);
+        }
+
+        // ── 1. Cuentas: saldo almacenado vs. suma real de sus transacciones ──
+        // Hoy SaldoActual es un contador acumulado que se actualiza a mano en 9 lugares
+        // distintos. Esta comprobación es la que detecta la deriva.
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT c.Id, c.Nombre, c.SaldoActual,
+                       COALESCE((SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
+                                 FROM Transacciones t WHERE t.CuentaId = c.Id), 0)
+                FROM Cuentas c
+                """;
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                var nombre    = r.GetString(1);
+                var guardado  = (decimal)r.GetDouble(2);
+                var calculado = (decimal)r.GetDouble(3);
+                var deriva    = guardado - calculado;
+                if (Math.Abs(deriva) > 0.01m)
+                    Add(SeveridadProblema.Critico, "Cuentas",
+                        $"El saldo guardado de «{nombre}» no coincide con sus transacciones.",
+                        $"Guardado: {guardado:N2} · Calculado: {calculado:N2} · Deriva: {deriva:N2}");
+            }
+        }
+
+        // ── 2. Tarjetas: SaldoUsado vs. cargos del período en curso ──
+        // El modelo actual afirma que SaldoUsado son los cargos desde el último corte.
+        // Se consulta la tabla directamente: ObtenerTarjetas() escribiría (AutoRenovarPeriodo).
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT Id, Nombre, SaldoUsado, DiaCierre FROM TarjetasCredito";
+            var tarjetas = new List<(int Id, string Nombre, decimal Saldo, int DiaCierre)>();
+            using (var r = cmd.ExecuteReader())
+                while (r.Read())
+                    tarjetas.Add((r.GetInt32(0), r.GetString(1), (decimal)r.GetDouble(2), r.GetInt32(3)));
+
+            foreach (var t in tarjetas)
+            {
+                var inicioPeriodo = new TarjetaCredito { DiaCierre = t.DiaCierre }.InicioPeriodo;
+                var cargos = (decimal)EjecutarScalar<double>(conn,
+                    "SELECT COALESCE(SUM(Monto), 0) FROM Transacciones " +
+                    "WHERE TarjetaCreditoId = $id AND Tipo = 'Gasto' AND Fecha >= $desde",
+                    ("$id", t.Id), ("$desde", inicioPeriodo.ToString("yyyy-MM-dd")));
+
+                var deriva = t.Saldo - cargos;
+                if (Math.Abs(deriva) > 0.01m)
+                    Add(SeveridadProblema.Critico, "Tarjetas",
+                        $"El saldo usado de «{t.Nombre}» no coincide con los cargos del período.",
+                        $"Guardado: {t.Saldo:N2} · Cargos desde {inicioPeriodo:dd/MM/yyyy}: {cargos:N2} · Deriva: {deriva:N2}");
+            }
+        }
+
+        // ── 3. Referencias rotas ──
+        Contar("SELECT COUNT(*) FROM Transacciones " +
+               "WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas)",
+            SeveridadProblema.Critico, "Cuentas",
+            "Transacciones que apuntan a una cuenta que ya no existe.",
+            "Sus importes ya no ajustan ningún saldo: la reversión al borrarlas no hace nada.");
+
+        Contar("SELECT COUNT(*) FROM Transacciones " +
+               "WHERE TarjetaCreditoId IS NOT NULL AND TarjetaCreditoId NOT IN (SELECT Id FROM TarjetasCredito)",
+            SeveridadProblema.Critico, "Tarjetas",
+            "Transacciones que apuntan a una tarjeta que ya no existe.",
+            "Quedan excluidas de todos los totales y son inalcanzables desde la interfaz.");
+
+        Contar("SELECT COUNT(*) FROM PagosMensuales " +
+               "WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones)",
+            SeveridadProblema.Advertencia, "Pagos fijos",
+            "Pagos marcados que apuntan a una transacción borrada.");
+
+        Contar("SELECT COUNT(*) FROM PagosMensuales " +
+               "WHERE TipoFijo='Gasto' AND FijoId NOT IN (SELECT Id FROM GastosFijos)",
+            SeveridadProblema.Advertencia, "Pagos fijos",
+            "Pagos mensuales de un gasto fijo que ya no existe.");
+
+        Contar("SELECT COUNT(*) FROM PagosMensuales " +
+               "WHERE TipoFijo='Ingreso' AND FijoId NOT IN (SELECT Id FROM IngresosFijos)",
+            SeveridadProblema.Advertencia, "Pagos fijos",
+            "Pagos mensuales de un ingreso fijo que ya no existe.");
+
+        Contar("SELECT COUNT(*) FROM IngresoLaboralDirecto " +
+               "WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones)",
+            SeveridadProblema.Advertencia, "Control Laboral",
+            "Ingresos laborales directos cuya transacción fue borrada.");
+
+        Contar("SELECT COUNT(*) FROM PeriodosLaborales " +
+               "WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones)",
+            SeveridadProblema.Advertencia, "Control Laboral",
+            "Períodos laborales cuya transacción de salario fue borrada.");
+
+        // ── 4. Estados imposibles ──
+        Contar("SELECT COUNT(*) FROM PagosMensuales WHERE Pagado=1 AND TransaccionId IS NULL",
+            SeveridadProblema.Critico, "Pagos fijos",
+            "Pagos marcados como pagados sin transacción asociada.",
+            "Eliminar el ingreso fijo correspondiente provoca un fallo de la aplicación.");
+
+        Contar("SELECT COUNT(*) FROM Transacciones WHERE TarjetaCreditoId IS NOT NULL AND Tipo='Ingreso'",
+            SeveridadProblema.Critico, "Transacciones",
+            "Ingresos registrados con una tarjeta de crédito como origen.",
+            "No suman en ningún total: quedan fuera del balance, los reportes y el cierre de mes.");
+
+        Contar("SELECT COUNT(*) FROM Transacciones WHERE Monto <= 0",
+            SeveridadProblema.Advertencia, "Transacciones",
+            "Transacciones con importe cero o negativo.");
+
+        Contar("SELECT COUNT(*) FROM GastosFijos " +
+               "WHERE DiaVencimiento2 > 0 AND DiaVencimiento2 = DiaVencimiento",
+            SeveridadProblema.Critico, "Gastos fijos",
+            "Gastos fijos con el segundo día igual al primero.",
+            "Ambas filas comparten el mismo pago mensual: marcar una marca las dos y el total se duplica.");
+
+        Contar("SELECT COUNT(*) FROM IngresosFijos " +
+               "WHERE DiaIngreso2 > 0 AND DiaIngreso2 = DiaIngreso",
+            SeveridadProblema.Critico, "Ingresos fijos",
+            "Ingresos fijos con el segundo día igual al primero.",
+            "Ambas filas comparten el mismo pago mensual: marcar una marca las dos y el total se duplica.");
+
+        Contar("SELECT COUNT(*) FROM Transacciones " +
+               "WHERE Categoria NOT IN (SELECT Nombre FROM Categorias)",
+            SeveridadProblema.Advertencia, "Categorías",
+            "Transacciones con una categoría que ya no existe.",
+            "Siguen agrupándose en los gráficos pero no aparecen en el desplegable de filtro.");
+
+        Contar("SELECT COUNT(*) FROM IngresosFijos " +
+               "WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas)",
+            SeveridadProblema.Advertencia, "Ingresos fijos",
+            "Ingresos fijos ligados a una cuenta que ya no existe.");
+
+        // ── 5. Datos huérfanos de usuarios eliminados ──
+        // EliminarUsuario() sólo limpia 7 de las 13 tablas que tienen UsuarioId.
+        foreach (var tabla in new[]
+                 {
+                     "Transacciones", "MetasAhorro", "TarjetasCredito", "GastosFijos",
+                     "IngresosFijos", "PagosMensuales", "Categorias", "Cuentas",
+                     "ConfiguracionLaboral", "RegistrosDiasLaborales", "PeriodosLaborales",
+                     "IngresoLaboralDirecto", "ResumenMensual"
+                 })
+        {
+            // Categorias admite UsuarioId NULL (globales): esas no son huérfanas.
+            var filtroNull = tabla == "Categorias" ? "UsuarioId IS NOT NULL AND " : "";
+            Contar($"SELECT COUNT(*) FROM {tabla} " +
+                   $"WHERE {filtroNull}UsuarioId NOT IN (SELECT Id FROM Usuarios)",
+                SeveridadProblema.Advertencia, "Usuarios",
+                $"Filas en «{tabla}» de un usuario que ya no existe.");
+        }
+
+        // ── 6. Cierres mensuales desactualizados ──
+        // CerrarMes() guarda una foto. Nada impide editar el mes después del cierre.
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT UsuarioId, Anio, Mes, Ingresos, Gastos FROM ResumenMensual";
+            var cierres = new List<(int Uid, int Anio, int Mes, decimal Ing, decimal Gas)>();
+            using (var r = cmd.ExecuteReader())
+                while (r.Read())
+                    cierres.Add((r.GetInt32(0), r.GetInt32(1), r.GetInt32(2),
+                                 (decimal)r.GetDouble(3), (decimal)r.GetDouble(4)));
+
+            foreach (var c in cierres)
+            {
+                var desde = new DateTime(c.Anio, c.Mes, 1);
+                var hasta = desde.AddMonths(1).AddDays(-1);
+
+                decimal Total(string tipo) => (decimal)EjecutarScalar<double>(conn,
+                    "SELECT COALESCE(SUM(Monto),0) FROM Transacciones " +
+                    "WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL AND Tipo=$tipo " +
+                    "AND Fecha >= $desde AND Fecha <= $hasta",
+                    ("$uid", c.Uid), ("$tipo", tipo),
+                    ("$desde", desde.ToString("yyyy-MM-dd")), ("$hasta", hasta.ToString("yyyy-MM-dd")));
+
+                var ing = Total("Ingreso");
+                var gas = Total("Gasto");
+
+                if (Math.Abs(ing - c.Ing) > 0.01m || Math.Abs(gas - c.Gas) > 0.01m)
+                    Add(SeveridadProblema.Advertencia, "Cierre mensual",
+                        $"El cierre de {c.Mes:D2}/{c.Anio} ya no coincide con sus transacciones.",
+                        $"Guardado: +{c.Ing:N2} / -{c.Gas:N2} · Actual: +{ing:N2} / -{gas:N2}");
+            }
+        }
+
+        return problemas
+            .OrderBy(p => p.Severidad)
+            .ThenBy(p => p.Area)
+            .ToList();
     }
 }

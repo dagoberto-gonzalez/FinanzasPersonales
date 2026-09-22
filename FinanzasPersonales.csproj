@@ -10,11 +10,14 @@
     <AssemblyName>FinanzasPersonales</AssemblyName>
   </PropertyGroup>
 
-  <!-- Excluir herramientas auxiliares del build principal -->
+  <!-- Excluir herramientas auxiliares y pruebas del build principal -->
   <ItemGroup>
     <Compile Remove="Tools\**" />
     <EmbeddedResource Remove="Tools\**" />
     <None Remove="Tools\**" />
+    <Compile Remove="Tests\**" />
+    <EmbeddedResource Remove="Tests\**" />
+    <None Remove="Tests\**" />
   </ItemGroup>
 
   <ItemGroup>

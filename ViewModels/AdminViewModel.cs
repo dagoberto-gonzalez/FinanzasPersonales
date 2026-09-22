@@ -57,10 +57,34 @@ public class AdminViewModel : BaseViewModel
     public Visibility OkConfigVisibility =>
         string.IsNullOrEmpty(_okConfig) ? Visibility.Collapsed : Visibility.Visible;
 
+    // ── Diagnóstico de integridad ─────────────────────────────────────────────
+    public ObservableCollection<ProblemaIntegridad> Problemas { get; } = [];
+
+    private bool   _diagnosticoEjecutado;
+    private string _diagnosticoResumen = string.Empty;
+
+    public string DiagnosticoResumen
+    {
+        get => _diagnosticoResumen;
+        private set { _diagnosticoResumen = value; OnPropertyChanged(); }
+    }
+
+    public string DiagnosticoColor =>
+        Problemas.Any(p => p.Severidad == SeveridadProblema.Critico) ? "#F38BA8"
+        : Problemas.Count > 0                                        ? "#FAB387"
+                                                                     : "#A6E3A1";
+
+    public Visibility DiagnosticoResumenVisibility =>
+        _diagnosticoEjecutado ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility DiagnosticoListaVisibility =>
+        Problemas.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
     // ── Comandos ──────────────────────────────────────────────────────────────
     public ICommand ToggleActivoCommand  { get; }
     public ICommand EliminarUsuarioCommand { get; }
     public ICommand GuardarConfigCommand { get; }
+    public ICommand EjecutarDiagnosticoCommand { get; }
 
     public AdminViewModel(AppDatabase db)
     {
@@ -68,7 +92,27 @@ public class AdminViewModel : BaseViewModel
         ToggleActivoCommand    = new RelayCommand<Usuario>(ToggleActivo);
         EliminarUsuarioCommand = new RelayCommand<Usuario>(EliminarUsuario);
         GuardarConfigCommand   = new RelayCommand(GuardarConfig);
+        EjecutarDiagnosticoCommand = new RelayCommand(EjecutarDiagnostico);
         Cargar();
+    }
+
+    private void EjecutarDiagnostico()
+    {
+        Problemas.Clear();
+        foreach (var p in _db.VerificarIntegridad())
+            Problemas.Add(p);
+
+        _diagnosticoEjecutado = true;
+
+        var criticos = Problemas.Count(p => p.Severidad == SeveridadProblema.Critico);
+        DiagnosticoResumen = Problemas.Count == 0
+            ? "✓ Sin discrepancias. Las distintas fuentes de saldo cuadran entre sí."
+            : $"Se encontraron {Problemas.Count} discrepancia{(Problemas.Count == 1 ? "" : "s")}" +
+              (criticos > 0 ? $", {criticos} de ellas críticas." : ".");
+
+        OnPropertyChanged(nameof(DiagnosticoColor));
+        OnPropertyChanged(nameof(DiagnosticoResumenVisibility));
+        OnPropertyChanged(nameof(DiagnosticoListaVisibility));
     }
 
     public void Actualizar() => Cargar();
