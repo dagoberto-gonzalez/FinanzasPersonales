@@ -62,21 +62,36 @@ public class TransaccionesViewModel : BaseViewModel
         }
     }
 
+    private const string MetodoTarjeta = "Tarjeta";
+
     /// <summary>
     /// "Tarjeta" sólo tiene sentido en un gasto: una tarjeta de crédito no origina ingresos.
     /// Antes la opción estaba siempre disponible y el ingreso resultante desaparecía de todos
     /// los totales sin avisar.
+    /// <para>
+    /// Se quita y se pone esa única entrada en lugar de reconstruir la lista. Vaciarla dejaba
+    /// el ComboBox sin selección: WPF anula el SelectedItem al quedarse sin elementos y no
+    /// vuelve a evaluar el binding cuando se repuebla, así que el campo quedaba en blanco
+    /// aunque el ViewModel dijera "Efectivo".
+    /// </para>
     /// </summary>
     private void RefrescarMetodosPago()
     {
-        MetodosPago.Clear();
-        MetodosPago.Add("Efectivo");
-        MetodosPago.Add("Transferencia");
-        MetodosPago.Add("SINPE Móvil");
-        if (!_esIngreso) MetodosPago.Add("Tarjeta");
+        if (_esIngreso)
+        {
+            if (!MetodosPago.Contains(MetodoTarjeta)) return;
 
-        if (!MetodosPago.Contains(_metodoPago))
-            MetodoPago = "Efectivo";
+            // El orden es lo que importa: primero se mueve la selección, después se quita el
+            // elemento. Si se quita el elemento que está seleccionado, el ComboBox anula su
+            // selección por su cuenta y ya no vuelve a leer el binding — el ViewModel queda
+            // en "Efectivo" y el campo se ve en blanco.
+            if (_metodoPago == MetodoTarjeta) MetodoPago = "Efectivo";
+            MetodosPago.Remove(MetodoTarjeta);
+        }
+        else if (!MetodosPago.Contains(MetodoTarjeta))
+        {
+            MetodosPago.Add(MetodoTarjeta);
+        }
     }
 
     public string Monto

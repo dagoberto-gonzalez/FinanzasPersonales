@@ -52,11 +52,12 @@
                              Text="{Binding Monto, UpdateSourceTrigger=PropertyChanged}"
                              Tag="₡ Monto"/>
 
-                    <!-- Categoría: solo visible para Gastos -->
+                    <!-- Categoría: visible en gastos e ingresos. Estuvo oculta en los ingresos,
+                         pero Guardar() seguía escribiendo la categoría seleccionada, así que
+                         todos los ingresos acababan en la primera de la lista sin que se viera. -->
                     <ComboBox Grid.Column="6"
                               ItemsSource="{Binding CategoriasForm}"
-                              SelectedItem="{Binding Categoria}"
-                              Visibility="{Binding EsGasto, Converter={StaticResource BoolToVis}}"/>
+                              SelectedItem="{Binding Categoria}"/>
 
                     <!-- Fecha -->
                     <DatePicker Grid.Column="8"
