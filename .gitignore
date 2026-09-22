@@ -1,2 +1,7 @@
 *_wpftmp.csproj
 .claude/settings.local.json
+
+# Build artifacts
+bin/
+obj/
+.vs/
