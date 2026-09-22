@@ -45,6 +45,7 @@ public class TransaccionesViewModel : BaseViewModel
             OnPropertyChanged();
             OnPropertyChanged(nameof(EsGasto));
             OnPropertyChanged(nameof(EsTarjeta));
+            RefrescarMetodosPago();
         }
     }
 
@@ -57,7 +58,25 @@ public class TransaccionesViewModel : BaseViewModel
             OnPropertyChanged();
             OnPropertyChanged(nameof(EsIngreso));
             OnPropertyChanged(nameof(EsTarjeta));
+            RefrescarMetodosPago();
         }
+    }
+
+    /// <summary>
+    /// "Tarjeta" sólo tiene sentido en un gasto: una tarjeta de crédito no origina ingresos.
+    /// Antes la opción estaba siempre disponible y el ingreso resultante desaparecía de todos
+    /// los totales sin avisar.
+    /// </summary>
+    private void RefrescarMetodosPago()
+    {
+        MetodosPago.Clear();
+        MetodosPago.Add("Efectivo");
+        MetodosPago.Add("Transferencia");
+        MetodosPago.Add("SINPE Móvil");
+        if (!_esIngreso) MetodosPago.Add("Tarjeta");
+
+        if (!MetodosPago.Contains(_metodoPago))
+            MetodoPago = "Efectivo";
     }
 
     public string Monto
@@ -92,7 +111,9 @@ public class TransaccionesViewModel : BaseViewModel
         get => _metodoPago;
         set
         {
-            _metodoPago = value;
+            // Al reconstruir MetodosPago, WPF empuja null en el SelectedItem mientras la
+            // colección está vacía. Sin esta guarda el método quedaría en null.
+            _metodoPago = string.IsNullOrEmpty(value) ? "Efectivo" : value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(EsTarjeta));
             OnPropertyChanged(nameof(MostrarSubItems));
@@ -153,7 +174,8 @@ public class TransaccionesViewModel : BaseViewModel
     public ObservableCollection<string>      CategoriasFiltro { get; } = [];
     public ObservableCollection<SubItem> SubItems { get; } = [];
 
-    public IReadOnlyList<string> MetodosPago { get; } =
+    /// <summary>Se reconstruye según el tipo: ver <c>RefrescarMetodosPago</c>.</summary>
+    public ObservableCollection<string> MetodosPago { get; } =
         ["Efectivo", "Transferencia", "SINPE Móvil", "Tarjeta"];
 
     // ── Comandos ──────────────────────────────────────────────────────────────
@@ -262,7 +284,9 @@ public class TransaccionesViewModel : BaseViewModel
         if (haySubItem)
         {
             cuenta = _selectedSubItem!.Nombre;
-            if (_metodoPago == "Tarjeta")
+            // La red de seguridad: aunque la UI ya oculta "Tarjeta" en los ingresos, nunca se
+            // resuelve una tarjeta para un ingreso (AppDatabase también lo rechaza).
+            if (_metodoPago == "Tarjeta" && !_esIngreso)
             {
                 // Intentar como tarjeta de crédito primero
                 var tarjetas = _db.ObtenerTarjetas(_uid);

@@ -82,6 +82,7 @@ public class RutasDeDineroTests
 
         // Una tarjeta recién sembrada tiene FechaUltimoCorte vacía, así que la PRIMERA lectura
         // dispara AutoRenovarPeriodo y pone el saldo en cero. La app hace esto en cada pantalla.
+        // Este "asiento" artificial desaparece al aplicar la decisión D3 del Bloque 2.
         // Ver BugsConocidosTests.Bug_2_1_LeerLasTarjetasBorraElSaldoUsado.
         t.Db.ObtenerTarjetas(t.UsuarioId);
 
@@ -114,10 +115,7 @@ public class RutasDeDineroTests
         t.Db.MarcarGastoFijoPagado(pago.PagoMensualId, true, "Principal", t.UsuarioId, cuentaId, null);
         Assert.Equal(-25000m, SaldoDe(t, cuentaId));
         Assert.Single(t.Db.ObtenerTransacciones(t.UsuarioId));
-        // La app etiqueta esta transacción con la categoría «Gastos Fijos», que no existe en
-        // la tabla Categorias (ver Bug_6_LasCategoriasDelSistemaNoExistenEnLaTabla). Por eso se
-        // exige ausencia de críticos y no una lista vacía.
-        Assert.Empty(t.Criticos());
+        Assert.Empty(t.Db.VerificarIntegridad());
 
         t.Db.MarcarGastoFijoPagado(pago.PagoMensualId, false, "", t.UsuarioId);
         Assert.Equal(0m, SaldoDe(t, cuentaId));
@@ -141,10 +139,37 @@ public class RutasDeDineroTests
 
         t.Db.MarcarIngresoFijoRecibido(pago.PagoMensualId, true, t.UsuarioId);
         Assert.Equal(600000m, SaldoDe(t, cuentaId));
-        Assert.Empty(t.Criticos()); // categoría «Ingresos Fijos» inexistente: ver Bug_6_*
+        Assert.Empty(t.Db.VerificarIntegridad());
 
         t.Db.MarcarIngresoFijoRecibido(pago.PagoMensualId, false, t.UsuarioId);
         Assert.Equal(0m, SaldoDe(t, cuentaId));
+        Assert.Empty(t.Db.VerificarIntegridad());
+    }
+
+    /// <summary>
+    /// Regresión de §2.4 (corregido en Bloque 1 · 1.2): las filas heredadas de la migración
+    /// <c>PagosMensuales_v2</c> tienen <c>Pagado=1</c> pero <c>TransaccionId</c> NULL.
+    /// Antes reventaban al eliminar el ingreso fijo; ahora se ignoran, igual que en gastos.
+    /// </summary>
+    [Fact]
+    public void EliminarIngresoFijo_ConPagosLegadosSinTransaccion_NoRevienta()
+    {
+        using var t = new BaseDePrueba();
+        var hoy = DateTime.Today;
+
+        t.Db.InsertarIngresoFijo(new IngresoFijo
+        {
+            Nombre = "Sueldo", Monto = 600000, DiaIngreso = 15
+        }, t.UsuarioId);
+
+        var ingresoId = (int)t.Escalar<long>("SELECT Id FROM IngresosFijos LIMIT 1");
+        t.Db.ObtenerIngresosFijosConEstado(hoy.Year, hoy.Month, t.UsuarioId);
+        t.Sql("UPDATE PagosMensuales SET Pagado = 1, TransaccionId = NULL");
+
+        t.Db.EliminarIngresoFijo(ingresoId);
+
+        Assert.Equal(0, t.Escalar<long>("SELECT COUNT(*) FROM IngresosFijos"));
+        Assert.Equal(0, t.Escalar<long>("SELECT COUNT(*) FROM PagosMensuales WHERE TipoFijo='Ingreso'"));
         Assert.Empty(t.Db.VerificarIntegridad());
     }
 
@@ -158,7 +183,7 @@ public class RutasDeDineroTests
             t.UsuarioId, new DateTime(2026, 9, 15), 450000, "Quincena", cuentaId);
 
         Assert.Equal(450000m, SaldoDe(t, cuentaId));
-        Assert.Empty(t.Criticos()); // categoría «Salario» inexistente: ver Bug_6_*
+        Assert.Empty(t.Db.VerificarIntegridad());
 
         var directo = t.Db.ObtenerIngresosLaboralesDirectos(t.UsuarioId).Single();
         t.Db.EliminarIngresoLaboralDirecto(directo.Id);

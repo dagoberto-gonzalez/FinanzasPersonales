@@ -178,6 +178,11 @@ public class GastosFijosViewModel : BaseViewModel
                 MensajeError = "El segundo día debe ser entre 1 y 31.";
                 return;
             }
+            if (dia2 == dia)
+            {
+                MensajeError = "El segundo día no puede ser igual al primero. Déjalo vacío si solo se paga una vez al mes.";
+                return;
+            }
         }
 
         _db.InsertarGastoFijo(new GastoFijo

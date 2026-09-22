@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using FinanzasPersonales.Data;
 using FinanzasPersonales.Models;
+using FinanzasPersonales.Services;
 
 namespace FinanzasPersonales.ViewModels;
 
@@ -117,12 +117,23 @@ public class TarjetasViewModel : BaseViewModel
         string.IsNullOrEmpty(_nuevaError) ? Visibility.Collapsed : Visibility.Visible;
 
     // ── Abono ─────────────────────────────────────────────────────────────────
-    private string _abonoMonto = string.Empty;
+    private string  _abonoMonto = string.Empty;
+    private Cuenta? _cuentaAbono;
+
     public string AbonoMonto
     {
         get => _abonoMonto;
         set { _abonoMonto = value; OnPropertyChanged(); }
     }
+
+    /// <summary>Cuenta de la que sale el pago. Si es null, el abono se registra como efectivo.</summary>
+    public Cuenta? CuentaAbono
+    {
+        get => _cuentaAbono;
+        set { _cuentaAbono = value; OnPropertyChanged(); }
+    }
+
+    public ObservableCollection<Cuenta> CuentasDisponibles { get; } = [];
 
     // ── Colecciones ───────────────────────────────────────────────────────────
     public ObservableCollection<TarjetaCredito> Tarjetas    { get; } = [];
@@ -155,6 +166,14 @@ public class TarjetasViewModel : BaseViewModel
         foreach (var t in lista)
             Tarjetas.Add(t);
 
+        var prevCuentaId = _cuentaAbono?.Id;
+        CuentasDisponibles.Clear();
+        foreach (var c in _db.ObtenerCuentas(_uid).Where(c => c.Activa))
+            CuentasDisponibles.Add(c);
+        CuentaAbono = prevCuentaId.HasValue
+            ? CuentasDisponibles.FirstOrDefault(c => c.Id == prevCuentaId)
+            : CuentasDisponibles.FirstOrDefault();
+
         if (prevId.HasValue)
             Seleccionada = Tarjetas.FirstOrDefault(t => t.Id == prevId);
     }
@@ -179,9 +198,8 @@ public class TarjetasViewModel : BaseViewModel
             return;
         }
 
-        // Parsear límite (puede tener separadores de miles)
-        var limStr = _editLimite.Replace(".", "").Replace(",", "");
-        if (!decimal.TryParse(limStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var limite) || limite <= 0)
+        // El campo llega pre-rellenado con ToString("N0"), o sea con separadores de miles.
+        if (!Dinero.TryParsePositivo(_editLimite, out var limite))
         {
             MensajeError = "Límite de crédito inválido.";
             return;
@@ -218,8 +236,7 @@ public class TarjetasViewModel : BaseViewModel
             return;
         }
 
-        var limStr = _nuevaLimite.Replace(".", "").Replace(",", "");
-        if (!decimal.TryParse(limStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var limite) || limite <= 0)
+        if (!Dinero.TryParsePositivo(_nuevaLimite, out var limite))
         {
             NuevaError = "Límite inválido.";
             return;
@@ -271,14 +288,16 @@ public class TarjetasViewModel : BaseViewModel
         if (_seleccionada is null) return;
         MensajeError = string.Empty;
 
-        var montoStr = _abonoMonto.Replace(".", "").Replace(",", "");
-        if (!decimal.TryParse(montoStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var monto) || monto <= 0)
+        if (!Dinero.TryParsePositivo(_abonoMonto, out var monto))
         {
             MensajeError = "Monto de abono inválido.";
             return;
         }
 
-        // Registrar pago como transacción (reduce balance real)
+        // El pago sale de una cuenta concreta. Antes venía fijo como "Banco BAC" y con
+        // CuentaId nulo, así que bajaba el balance global sin descontar de ninguna cuenta.
+        var cuenta = _cuentaAbono;
+
         _db.InsertarTransaccion(new Transaccion
         {
             Tipo             = "Gasto",
@@ -287,7 +306,8 @@ public class TarjetasViewModel : BaseViewModel
             Descripcion      = $"Pago tarjeta {_seleccionada.Nombre}",
             Notas            = "Abono registrado manualmente",
             Fecha            = DateTime.Today,
-            CuentaNombre     = "Banco BAC",
+            CuentaNombre     = cuenta?.Nombre ?? "Efectivo",
+            CuentaId         = cuenta?.Id,
             TarjetaCreditoId = null
         }, _uid);
 

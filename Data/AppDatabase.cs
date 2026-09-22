@@ -442,7 +442,8 @@ public class AppDatabase
         // Nota: SQLite trata NULL != NULL en UNIQUE, así que INSERT OR IGNORE no evita duplicados
         // cuando UsuarioId es NULL. Usamos WHERE NOT EXISTS para verificar antes de insertar.
         var cats = new[] { "Alimentación", "Transporte", "Salud", "Entretenimiento",
-                           "Educación", "Servicios", "Hogar", "Ropa", "Tecnología", "Otros" };
+                           "Educación", "Servicios", "Hogar", "Ropa", "Tecnología", "Otros" }
+                   .Concat(CategoriasSistema);
         foreach (var c in cats)
             EjecutarNonQuery(conn,
                 "INSERT INTO Categorias (UsuarioId, Nombre) SELECT NULL,$n WHERE NOT EXISTS (SELECT 1 FROM Categorias WHERE UsuarioId IS NULL AND Nombre=$n)",
@@ -602,6 +603,18 @@ public class AppDatabase
 
     // ── Categorías ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Categorías que la propia aplicación escribe por nombre al generar transacciones
+    /// automáticas (pagos de fijos, salario, pagos de tarjeta). Se siembran como globales
+    /// y no se pueden renombrar ni borrar: si cambiaran de nombre, el código seguiría
+    /// escribiendo el nombre viejo y las transacciones quedarían descolgadas del filtro.
+    /// </summary>
+    public static readonly string[] CategoriasSistema =
+        ["Gastos Fijos", "Ingresos Fijos", "Salario", "Tarjeta"];
+
+    public static bool EsCategoriaSistema(string nombre) =>
+        CategoriasSistema.Contains(nombre, StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Devuelve nombres de categorías visibles para el usuario: globales + propias.</summary>
     public List<string> ObtenerCategorias(int usuarioId)
     {
@@ -651,6 +664,13 @@ public class AppDatabase
     public void EliminarCategoria(int categoriaId, int usuarioId, bool esAdmin)
     {
         using var conn = Abrir();
+
+        // Las categorías de sistema no se borran ni siendo admin: la aplicación las escribe
+        // por nombre al generar transacciones automáticas.
+        var nombre = EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT Nombre FROM Categorias WHERE Id=$id),'')", ("$id", categoriaId));
+        if (EsCategoriaSistema(nombre)) return;
+
         // Admin puede borrar cualquiera; usuario normal solo las propias
         if (esAdmin)
             EjecutarNonQuery(conn, "DELETE FROM Categorias WHERE Id=$id", ("$id", categoriaId));
@@ -662,6 +682,12 @@ public class AppDatabase
     public void ActualizarCategoria(int categoriaId, string nombreNuevo, int usuarioId, bool esAdmin)
     {
         using var conn = Abrir();
+
+        // Ver EliminarCategoria: renombrarla dejaría el código escribiendo el nombre viejo.
+        var nombreActual = EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT Nombre FROM Categorias WHERE Id=$id),'')", ("$id", categoriaId));
+        if (EsCategoriaSistema(nombreActual)) return;
+
         if (esAdmin)
             EjecutarNonQuery(conn,
                 "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id",
@@ -676,6 +702,13 @@ public class AppDatabase
 
     public void InsertarTransaccion(Transaccion t, int usuarioId)
     {
+        // Una tarjeta de crédito es una fuente de deuda, no de ingresos. Además, todos los
+        // totales de la aplicación excluyen las transacciones con TarjetaCreditoId, así que un
+        // ingreso así se guardaría y no sumaría en ninguna parte: dinero invisible.
+        if (t.Tipo == "Ingreso" && t.TarjetaCreditoId.HasValue)
+            throw new ArgumentException(
+                "Un ingreso no puede tener una tarjeta de crédito como origen.", nameof(t));
+
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
@@ -1019,9 +1052,15 @@ public class AppDatabase
     public void InsertarGastoFijo(GastoFijo g, int usuarioId)
     {
         using var conn = Abrir();
+
+        // Dos días iguales generarían dos filas en la interfaz compartiendo el MISMO
+        // PagoMensual (la clave única incluye Dia): marcar una marcaría las dos y el total
+        // se contaría por duplicado. Un segundo día repetido es, sencillamente, no tener segundo día.
+        var dia2 = g.DiaVencimiento2 == g.DiaVencimiento ? 0 : g.DiaVencimiento2;
+
         EjecutarNonQuery(conn,
             "INSERT INTO GastosFijos (UsuarioId,Nombre,Monto,DiaVencimiento,DiaVencimiento2) VALUES ($uid,$n,$m,$d,$d2)",
-            ("$uid", usuarioId), ("$n", g.Nombre), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", g.DiaVencimiento2));
+            ("$uid", usuarioId), ("$n", g.Nombre), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", dia2));
     }
 
     public void EliminarGastoFijo(int id)
@@ -1228,10 +1267,14 @@ public class AppDatabase
     public void InsertarIngresoFijo(IngresoFijo i, int usuarioId)
     {
         using var conn = Abrir();
+
+        // Ver la nota en InsertarGastoFijo: dos días iguales comparten PagoMensual y duplican.
+        var dia2 = i.DiaIngreso2 == i.DiaIngreso ? 0 : i.DiaIngreso2;
+
         EjecutarNonQuery(conn,
             "INSERT INTO IngresosFijos (UsuarioId,Nombre,Monto,DiaIngreso,DiaIngreso2,CuentaId) VALUES ($uid,$n,$m,$d,$d2,$cid)",
             ("$uid", usuarioId), ("$n", i.Nombre), ("$m", (double)i.Monto),
-            ("$d", i.DiaIngreso), ("$d2", i.DiaIngreso2),
+            ("$d", i.DiaIngreso), ("$d2", dia2),
             ("$cid", i.CuentaId.HasValue ? i.CuentaId.Value : DBNull.Value));
     }
 
@@ -1247,6 +1290,7 @@ public class AppDatabase
                 FROM PagosMensuales p
                 JOIN IngresosFijos i ON i.Id = p.FijoId
                 WHERE p.FijoId=$id AND p.TipoFijo='Ingreso' AND p.Pagado=1
+                  AND p.TransaccionId IS NOT NULL
                 """;
             cmd.Parameters.AddWithValue("$id", id);
             var pagos = new List<(long TransId, double Monto, int? CuentaId)>();

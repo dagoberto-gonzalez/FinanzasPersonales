@@ -125,6 +125,11 @@ public class CategoriasViewModel : BaseViewModel
     private void Eliminar(Categoria? cat)
     {
         if (cat is null) return;
+        if (AppDatabase.EsCategoriaSistema(cat.Nombre))
+        {
+            MensajeError = $"«{cat.Nombre}» es una categoría del sistema: la aplicación la usa para las transacciones automáticas y no se puede eliminar.";
+            return;
+        }
         if (!_esAdmin && cat.EsGlobal)
         {
             MensajeError = "No puedes eliminar categorías globales.";
@@ -144,6 +149,11 @@ public class CategoriasViewModel : BaseViewModel
     private void GuardarEdit()
     {
         if (_seleccionada is null) return;
+        if (AppDatabase.EsCategoriaSistema(_seleccionada.Nombre))
+        {
+            MensajeError = $"«{_seleccionada.Nombre}» es una categoría del sistema y no se puede renombrar.";
+            return;
+        }
         if (!_esAdmin && _seleccionada.EsGlobal)
         {
             MensajeError = "No puedes editar categorías globales.";

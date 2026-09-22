@@ -52,7 +52,8 @@ Data/            AppDatabase.cs — all SQLite CRUD via Microsoft.Data.Sqlite (~
                  ctor takes an optional dbPath (null = %APPDATA%); required for tests
                  VerificarIntegridad() — read-only consistency scan, see below
 Services/        SessionService (auth state: UsuarioId, Rol, EsAdmin)
-                 AppSettings (runtime config: Moneda symbol)
+                 AppSettings (runtime config: Moneda symbol — declared but NOT wired up yet)
+                 Dinero — parses user-entered amounts; use it for every money input
                  PdfExportService / PdfLaboralService — QuestPDF report generation
 ViewModels/      BaseViewModel, RelayCommand/RelayCommand<T>, one VM per view
 Controls/        PieChartControl, BarChartControl — custom charts drawn on WPF Canvas
@@ -97,6 +98,24 @@ Money amounts in `Transacciones`/`Cuentas`/`TarjetasCredito` are kept in sync ma
 inserting a Gasto against a `CuentaId` decrements `Cuentas.SaldoActual`, deleting it reverts the
 delta, and marking a `GastoFijo`/`IngresoFijo` paid in `PagosMensuales` both creates a linked
 `Transaccion` (`TransaccionId`) and adjusts the account balance — unmarking reverses both.
+
+## Invariants worth knowing
+
+These are enforced in `AppDatabase` (not just in the UI), so breaking them fails loudly:
+
+- **An `Ingreso` can never carry a `TarjetaCreditoId`** — `InsertarTransaccion` throws. Every
+  total in the app excludes transactions with a card, so such a row would be invisible money.
+  The Transacciones screen also drops "Tarjeta" from the method list when the type is Ingreso.
+- **A fixed item's second day can never equal the first** — `InsertarGastoFijo` /
+  `InsertarIngresoFijo` normalise it to 0. Two equal days produce two UI rows sharing one
+  `PagosMensuales` row (the unique key includes `Dia`), so the amount gets counted twice.
+- **`AppDatabase.CategoriasSistema`** (`Gastos Fijos`, `Ingresos Fijos`, `Salario`, `Tarjeta`)
+  are written *by name* by the code that generates automatic transactions. They are seeded as
+  global categories and cannot be renamed or deleted, not even by an admin — renaming one would
+  leave the code writing a name nobody can filter by.
+- **Money typed by the user goes through `Services.Dinero.TryParse`**, never a bare
+  `decimal.TryParse`. Fields pre-filled with `ToString("N0")` carry thousands separators
+  (`1.000.000`) while people type decimals as `1500,50` or `1500.50`; one parser handles all.
 
 ## Integrity verification
 

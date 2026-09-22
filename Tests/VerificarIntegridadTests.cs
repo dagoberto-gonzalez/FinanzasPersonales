@@ -109,14 +109,18 @@ public class VerificarIntegridadTests
         Assert.Equal(SeveridadProblema.Critico, p!.Severidad);
     }
 
+    // Desde el Bloque 1 · 1.5 InsertarGastoFijo/InsertarIngresoFijo normalizan el día repetido,
+    // así que la corrupción se inyecta por SQL: el verificador tiene que seguir cazando las
+    // filas que ya estuvieran mal en bases anteriores a esa corrección.
+
     [Fact]
     public void DetectaGastoFijoConSegundoDiaIgualAlPrimero()
     {
         using var t = new BaseDePrueba();
-        t.Db.InsertarGastoFijo(new GastoFijo
-        {
-            Nombre = "Luz", Monto = 20000, DiaVencimiento = 15, DiaVencimiento2 = 15
-        }, t.UsuarioId);
+        t.Sql($"""
+            INSERT INTO GastosFijos (UsuarioId,Nombre,Monto,DiaVencimiento,DiaVencimiento2,Activo)
+            VALUES ({t.UsuarioId},'Luz',20000,15,15,1)
+            """);
 
         var p = Buscar(t.Db.VerificarIntegridad(), "Gastos fijos", "segundo día igual");
         Assert.NotNull(p);
@@ -127,10 +131,10 @@ public class VerificarIntegridadTests
     public void DetectaIngresoFijoConSegundoDiaIgualAlPrimero()
     {
         using var t = new BaseDePrueba();
-        t.Db.InsertarIngresoFijo(new IngresoFijo
-        {
-            Nombre = "Sueldo", Monto = 500000, DiaIngreso = 15, DiaIngreso2 = 15
-        }, t.UsuarioId);
+        t.Sql($"""
+            INSERT INTO IngresosFijos (UsuarioId,Nombre,Monto,DiaIngreso,DiaIngreso2,Activo)
+            VALUES ({t.UsuarioId},'Sueldo',500000,15,15,1)
+            """);
 
         Assert.NotNull(Buscar(t.Db.VerificarIntegridad(), "Ingresos fijos", "segundo día igual"));
     }

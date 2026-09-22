@@ -732,7 +732,9 @@ public class ControlLaboralViewModel : BaseViewModel
     public void EjecutarRegistroIngreso(DateTime fecha, decimal monto, string descripcion, int? cuentaId)
     {
         _db.InsertarIngresoLaboralDirecto(_uid, fecha, monto, descripcion, cuentaId);
-        _db.ReiniciarRegistrosDia(_uid, _anio, _mes);
+        // Antes aquí se llamaba a ReiniciarRegistrosDia(), que borraba TODOS los registros
+        // diarios del mes sin avisar: registrar un pago quincenal se llevaba por delante las
+        // horas extra ya cargadas. Registrar un ingreso no debe destruir la bitácora.
         CargarRegistros();
         CargarHistorial();
         ActualizarResumen();

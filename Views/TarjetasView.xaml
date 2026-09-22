@@ -271,6 +271,15 @@
                             <TextBox Text="{Binding AbonoMonto, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="₡ Monto" Margin="0,0,0,12"/>
 
+                            <TextBlock Text="Cuenta de origen" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
+                            <ComboBox ItemsSource="{Binding CuentasDisponibles}"
+                                      SelectedItem="{Binding CuentaAbono}"
+                                      DisplayMemberPath="Nombre"
+                                      Margin="0,0,0,4"/>
+                            <TextBlock Text="Si no eliges cuenta, el pago se registra como efectivo."
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
                             <Button Content="Registrar pago"
                                     Style="{StaticResource PrimaryButton}"
                                     Command="{Binding AbonarCommand}"/>
