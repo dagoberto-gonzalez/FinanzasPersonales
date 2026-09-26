@@ -17,6 +17,8 @@ namespace FinanzasPersonales.Tests;
 /// <para>
 /// Ya corregidos y migrados: §2.2 (ingreso con tarjeta), §2.4 (crash al eliminar ingreso fijo),
 /// §5 (días repetidos) y el hallazgo de las categorías del sistema — todos en el Bloque 1.
+/// §2.3 (reversión con el monto equivocado) dejó de existir con la decisión D1: al derivar el
+/// saldo de las cuentas ya no hay ningún importe que revertir.
 /// </para>
 /// </summary>
 public class BugsConocidosTests
@@ -54,39 +56,4 @@ public class BugsConocidosTests
         // Correcto sería: Assert.Equal(45000m, tarjeta.SaldoUsado);
     }
 
-    /// <summary>
-    /// §2.3 — Al desmarcar un ingreso fijo, la reversión lee el monto ACTUAL de
-    /// <c>IngresosFijos</c> en vez del monto de la transacción que realmente se creó.
-    /// Hoy es latente (no hay edición); se vuelve real en cuanto exista "editar ingreso fijo".
-    /// Correcto: revertir con el importe de la transacción, como ya hace la versión de gastos.
-    /// Se corrige en: Bloque 2 (antes de Bloque 4.2, que añade la edición).
-    /// </summary>
-    [Fact]
-    public void Bug_2_3_RevertirIngresoFijoUsaElMontoActualNoElRegistrado()
-    {
-        using var t = new BaseDePrueba();
-        t.Db.InsertarCuenta(new Cuenta { Nombre = "Principal" }, t.UsuarioId);
-        var cuentaId = t.Db.ObtenerCuentas(t.UsuarioId).Single().Id;
-        var hoy      = DateTime.Today;
-
-        t.Db.InsertarIngresoFijo(new IngresoFijo
-        {
-            Nombre = "Sueldo", Monto = 600000, DiaIngreso = 15, CuentaId = cuentaId
-        }, t.UsuarioId);
-
-        var pago = t.Db.ObtenerIngresosFijosConEstado(hoy.Year, hoy.Month, t.UsuarioId).Single();
-        t.Db.MarcarIngresoFijoRecibido(pago.PagoMensualId, true, t.UsuarioId);
-
-        Assert.Equal(600000m, t.Db.ObtenerCuentas(t.UsuarioId).Single().SaldoActual);
-
-        // Simula la edición que el Bloque 4.2 va a introducir: baja el monto del ingreso fijo.
-        t.Sql("UPDATE IngresosFijos SET Monto = 100000");
-
-        // Al desmarcar revierte 100.000 en vez de los 600.000 que realmente entraron.
-        t.Db.MarcarIngresoFijoRecibido(pago.PagoMensualId, false, t.UsuarioId);
-
-        Assert.Equal(500000m, t.Db.ObtenerCuentas(t.UsuarioId).Single().SaldoActual); // ← HOY (incorrecto)
-        Assert.NotEmpty(t.Db.VerificarIntegridad());                                  // el verificador lo caza
-        // Correcto sería: Assert.Equal(0m, ...) y VerificarIntegridad() vacío.
-    }
 }

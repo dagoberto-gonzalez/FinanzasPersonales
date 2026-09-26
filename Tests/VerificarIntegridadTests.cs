@@ -20,28 +20,8 @@ public class VerificarIntegridadTests
         Assert.Empty(t.Db.VerificarIntegridad());
     }
 
-    [Fact]
-    public void DetectaDerivaDeSaldoEnCuenta()
-    {
-        using var t = new BaseDePrueba();
-        t.Db.InsertarCuenta(new Cuenta { Nombre = "Principal" }, t.UsuarioId);
-        var cuentaId = t.Db.ObtenerCuentas(t.UsuarioId).Single().Id;
-
-        // Un gasto real de 900 …
-        t.Db.InsertarTransaccion(new Transaccion
-        {
-            Tipo = "Gasto", Monto = 900, Categoria = "Otros",
-            Fecha = new DateTime(2026, 9, 1), CuentaId = cuentaId
-        }, t.UsuarioId);
-
-        // … pero el contador dice otra cosa (esto es la deriva que buscamos).
-        t.Sql($"UPDATE Cuentas SET SaldoActual = 50000 WHERE Id = {cuentaId}");
-
-        var p = Buscar(t.Db.VerificarIntegridad(), "Cuentas", "no coincide");
-        Assert.NotNull(p);
-        Assert.Equal(SeveridadProblema.Critico, p!.Severidad);
-        Assert.Contains("50.900", p.Detalle); // 50000 - (-900)
-    }
+    // La comprobación de deriva de saldo en cuentas se retiró con la decisión D1: el saldo se
+    // calcula al leerlo, así que no puede desviarse. Ver Bloque2D1Tests.
 
     [Fact]
     public void DetectaDerivaDeSaldoEnTarjeta()
@@ -191,14 +171,13 @@ public class VerificarIntegridadTests
     public void VerificarIntegridad_NoModificaLaBase()
     {
         using var t = new BaseDePrueba();
-        t.Db.InsertarCuenta(new Cuenta { Nombre = "Principal" }, t.UsuarioId);
-        var cuentaId = t.Db.ObtenerCuentas(t.UsuarioId).Single().Id;
-        t.Sql($"UPDATE Cuentas SET SaldoActual = 777 WHERE Id = {cuentaId}");
+        var tarjetaId = t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
+        t.Sql($"UPDATE TarjetasCredito SET SaldoUsado = 777 WHERE Id = {tarjetaId}");
 
         t.Db.VerificarIntegridad();
         t.Db.VerificarIntegridad();
 
         // El diagnóstico reporta, nunca repara.
-        Assert.Equal(777.0, t.Escalar<double>($"SELECT SaldoActual FROM Cuentas WHERE Id={cuentaId}"));
+        Assert.Equal(777.0, t.Escalar<double>($"SELECT SaldoUsado FROM TarjetasCredito WHERE Id={tarjetaId}"));
     }
 }

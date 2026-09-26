@@ -87,17 +87,34 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 - `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion)` — Rol: "Admin"|"Normal"
 - `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId)`
 - `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite)`
-- `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoActual)` — UNIQUE(UsuarioId, Nombre)
+- `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial)` — UNIQUE(UsuarioId, Nombre). There is **no stored current balance**: see "Derived balances" below
 - `TarjetasCredito (Id, UsuarioId, Nombre, LimiteCredito, SaldoUsado, DiaCierre, DiaPago, FechaUltimoCorte)` — UNIQUE(UsuarioId, Nombre)
 - `GastosFijos` / `IngresosFijos (Id, UsuarioId, Nombre, Monto, Dia*Vencimiento|Ingreso, Dia*2, Activo)`
 - `PagosMensuales (Id, UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado, MetodoPago, TransaccionId)` — tracks per-month payment of a GastoFijo/IngresoFijo, UNIQUE(UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia)
 - `Categorias (Id, UsuarioId, Nombre)` — UsuarioId=NULL means global (all users see it), UNIQUE(UsuarioId, Nombre)
 - **Control Laboral (hourly-wage timesheet module):** `ConfiguracionLaboral (UsuarioId PK, SalarioPorHora, JornadaSemanal, DiaPago…)`, `RegistrosDiasLaborales (UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas/Nocturnas, HorasDobles, EsFeriado, EsAusencia…)` — UNIQUE(UsuarioId, Fecha), `PeriodosLaborales (UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId)`, `IngresoLaboralDirecto`, `ResumenMensual (UsuarioId, Anio, Mes, Ingresos, Gastos, Balance, BalanceAcumulado, NumTransacciones, FechaCierre…)` — one row per closed month, insert is idempotent (`INSERT OR IGNORE`)
 
-Money amounts in `Transacciones`/`Cuentas`/`TarjetasCredito` are kept in sync manually: e.g.
-inserting a Gasto against a `CuentaId` decrements `Cuentas.SaldoActual`, deleting it reverts the
-delta, and marking a `GastoFijo`/`IngresoFijo` paid in `PagosMensuales` both creates a linked
-`Transaccion` (`TransaccionId`) and adjusts the account balance — unmarking reverses both.
+### Derived balances (decision D1)
+
+**An account's balance is computed, never stored.** `ObtenerCuentas` returns
+`SaldoInicial + Σ (transactions with that CuentaId)`. There is no counter to keep in sync, so
+an account balance cannot drift from its transactions — it is the same number by construction.
+
+Practical consequences when touching this code:
+
+- **Never write a balance.** Inserting, deleting or reverting a transaction adjusts nothing;
+  the sum changes on its own. Ten `UPDATE Cuentas SET SaldoActual = ...` statements were removed
+  for exactly this reason — do not reintroduce one.
+- `Cuenta.SaldoActual` is a **read-only projection**. Assigning to it persists nothing.
+- `SaldoInicial` is the opening balance and the only writable figure. It is how a user squares
+  an account against their bank statement (Cuentas → Saldo inicial).
+- Indexes in `CrearIndices()` (notably `IX_Transacciones_CuentaId`) are what keep the per-read
+  `SUM` cheap. Keep them.
+
+`TarjetasCredito.SaldoUsado` is **still a manually maintained counter** — that is decision D3,
+not yet taken. Marking a `GastoFijo`/`IngresoFijo` paid in `PagosMensuales` still creates a
+linked `Transaccion` (`TransaccionId`); unmarking deletes it, and the account balance follows
+on its own.
 
 ## Invariants worth knowing
 
@@ -116,12 +133,19 @@ These are enforced in `AppDatabase` (not just in the UI), so breaking them fails
 - **Money typed by the user goes through `Services.Dinero.TryParse`**, never a bare
   `decimal.TryParse`. Fields pre-filled with `ToString("N0")` carry thousands separators
   (`1.000.000`) while people type decimals as `1500,50` or `1500.50`; one parser handles all.
+  It **rejects ambiguous input rather than guessing** — `1.200.00` is valid in no convention
+  (it would be `1.200,00` or `1,200.00`), and silently picking a reading is how a wrong figure
+  ends up recorded. A number may not use the same character for grouping and for decimals, and
+  thousands groups must be three digits.
 
 ## Integrity verification
 
 Money lives in several manually-synchronised places: `Transacciones` (the event log),
 `Cuentas.SaldoActual` and `TarjetasCredito.SaldoUsado` (running counters updated by hand in
 ~9 places each), plus `MetasAhorro.MontoActual` and `PeriodosLaborales`. Nothing reconciles them.
+
+(Since D1, account balances are no longer among them — they are derived. The account-drift check
+was removed from the verifier because it could never fire again.)
 
 `AppDatabase.VerificarIntegridad()` is that missing reconciliation. It is **read-only — it
 reports, it never repairs** — and returns `List<ProblemaIntegridad>` covering: stored-vs-computed

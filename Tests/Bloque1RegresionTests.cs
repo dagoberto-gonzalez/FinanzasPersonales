@@ -198,6 +198,37 @@ public class Bloque1RegresionTests
         Assert.False(Dinero.TryParse(texto, out _));
     }
 
+    /// <summary>
+    /// Lo ambiguo se rechaza en vez de adivinarse. <c>1.200.00</c> lo escribió Dagoberto
+    /// probando la pantalla de Cuentas: no es válido ni en es-CR (<c>1.200,00</c>) ni en
+    /// inglés (<c>1,200.00</c>), y el parser lo leía como 1.200 sin avisar. Si hubiera querido
+    /// un millón doscientos mil, habría guardado la cifra equivocada en silencio.
+    /// </summary>
+    [Theory]
+    [InlineData("1.200.00")]   // el mismo carácter de miles y de decimal
+    [InlineData("1,200,00")]
+    [InlineData("1.000,000")]  // mezcla los dos separadores
+    [InlineData("1.2345")]     // ni decimal (más de 2) ni grupo de miles (no son 3)
+    [InlineData("12.3456")]
+    [InlineData("1.00.000")]   // grupo de miles que no tiene tres cifras
+    [InlineData("-")]
+    public void Dinero_RechazaLoAmbiguoEnVezDeAdivinar(string texto)
+    {
+        Assert.False(Dinero.TryParse(texto, out _),
+            $"«{texto}» es ambiguo: debe rechazarse, no interpretarse.");
+    }
+
+    [Theory]
+    [InlineData("1.200,00",  1200.00)]   // es-CR bien escrito
+    [InlineData("1,200.00",  1200.00)]   // inglés bien escrito
+    [InlineData("1.200.000", 1200000)]   // miles encadenados
+    [InlineData(",50",       0.50)]      // sin parte entera
+    public void Dinero_AceptaLoQueSiEstaBienEscrito(string texto, decimal esperado)
+    {
+        Assert.True(Dinero.TryParse(texto, out var v));
+        Assert.Equal(esperado, v);
+    }
+
     [Theory]
     [InlineData("0")]
     [InlineData("-100")]

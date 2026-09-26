@@ -41,9 +41,8 @@ public class DiagnosticoAdminTests
     public void ConProblemaCritico_ResumenEnRojoYListaVisible()
     {
         using var t = new BaseDePrueba();
-        t.Db.InsertarCuenta(new Cuenta { Nombre = "Principal" }, t.UsuarioId);
-        var cuentaId = t.Db.ObtenerCuentas(t.UsuarioId).Single().Id;
-        t.Sql($"UPDATE Cuentas SET SaldoActual = 50000 WHERE Id = {cuentaId}");
+        var tarjetaId = t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
+        t.Sql($"UPDATE TarjetasCredito SET SaldoUsado = 50000 WHERE Id = {tarjetaId}");
 
         var vm = new AdminViewModel(t.Db);
         vm.EjecutarDiagnosticoCommand.Execute(null);

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using FinanzasPersonales.Data;
 using FinanzasPersonales.Models;
+using FinanzasPersonales.Services;
 
 namespace FinanzasPersonales.ViewModels;
 
@@ -17,6 +18,7 @@ public class CuentasViewModel : BaseViewModel
     private string  _editTipo   = "Cuenta corriente";
     private string  _editBanco  = string.Empty;
     private bool    _editActiva = true;
+    private string  _editSaldoInicial = "0";
     private string  _error      = string.Empty;
     private string  _mensajeOk  = string.Empty;
 
@@ -30,10 +32,11 @@ public class CuentasViewModel : BaseViewModel
             OnPropertyChanged(nameof(HaySeleccion));
             if (value is not null)
             {
-                EditNombre = value.Nombre;
-                EditTipo   = value.Tipo;
-                EditBanco  = value.Banco;
-                EditActiva = value.Activa;
+                EditNombre       = value.Nombre;
+                EditTipo         = value.Tipo;
+                EditBanco        = value.Banco;
+                EditActiva       = value.Activa;
+                EditSaldoInicial = value.SaldoInicial.ToString("N0");
             }
             MensajeError = string.Empty;
             MensajeOk    = string.Empty;
@@ -63,6 +66,17 @@ public class CuentasViewModel : BaseViewModel
         set { _editActiva = value; OnPropertyChanged(); }
     }
 
+    /// <summary>
+    /// Saldo de apertura: lo que había en la cuenta antes de la primera transacción registrada.
+    /// El saldo mostrado se deriva de este valor más las transacciones, así que editarlo aquí
+    /// es la forma de enderezar una cuenta que no cuadra con el banco.
+    /// </summary>
+    public string EditSaldoInicial
+    {
+        get => _editSaldoInicial;
+        set { _editSaldoInicial = value; OnPropertyChanged(); }
+    }
+
     public string MensajeError
     {
         get => _error;
@@ -83,7 +97,15 @@ public class CuentasViewModel : BaseViewModel
     private string _nuevaNombre = string.Empty;
     private string _nuevaTipo   = "Cuenta corriente";
     private string _nuevaBanco  = string.Empty;
+    private string _nuevaSaldoInicial = "0";
     private string _nuevaError  = string.Empty;
+
+    /// <summary>Saldo que ya tenía la cuenta al empezar a registrarla en la aplicación.</summary>
+    public string NuevoSaldoInicial
+    {
+        get => _nuevaSaldoInicial;
+        set { _nuevaSaldoInicial = value; OnPropertyChanged(); }
+    }
 
     public string NuevaNombre
     {
@@ -158,19 +180,27 @@ public class CuentasViewModel : BaseViewModel
             return;
         }
 
+        if (!Dinero.TryParse(_nuevaSaldoInicial, out var saldoInicial))
+        {
+            NuevaError = "Saldo inicial inválido. Usa 0 si la cuenta arranca vacía.";
+            return;
+        }
+
         try
         {
             _db.InsertarCuenta(new Cuenta
             {
-                Nombre = _nuevaNombre.Trim(),
-                Tipo   = _nuevaTipo,
-                Banco  = _nuevaBanco.Trim(),
-                Activa = true
+                Nombre       = _nuevaNombre.Trim(),
+                Tipo         = _nuevaTipo,
+                Banco        = _nuevaBanco.Trim(),
+                Activa       = true,
+                SaldoInicial = saldoInicial
             }, _uid);
 
-            NuevaNombre = string.Empty;
-            NuevoTipo   = "Cuenta corriente";
-            NuevoBanco  = string.Empty;
+            NuevaNombre       = string.Empty;
+            NuevoTipo         = "Cuenta corriente";
+            NuevoBanco        = string.Empty;
+            NuevoSaldoInicial = "0";
             Cargar();
         }
         catch (Microsoft.Data.Sqlite.SqliteException)
@@ -201,12 +231,19 @@ public class CuentasViewModel : BaseViewModel
             return;
         }
 
+        if (!Dinero.TryParse(_editSaldoInicial, out var saldoInicial))
+        {
+            MensajeError = "Saldo inicial inválido.";
+            return;
+        }
+
         try
         {
-            _seleccionada.Nombre = _editNombre.Trim();
-            _seleccionada.Tipo   = _editTipo;
-            _seleccionada.Banco  = _editBanco.Trim();
-            _seleccionada.Activa = _editActiva;
+            _seleccionada.Nombre       = _editNombre.Trim();
+            _seleccionada.Tipo         = _editTipo;
+            _seleccionada.Banco        = _editBanco.Trim();
+            _seleccionada.Activa       = _editActiva;
+            _seleccionada.SaldoInicial = saldoInicial;
             _db.ActualizarCuenta(_seleccionada);
             MensajeOk = "Cambios guardados.";
             Cargar();

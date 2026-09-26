@@ -180,6 +180,8 @@ public class AppDatabase
         MigrarCategorias(conn);
         // Migración mono→multi usuario
         MigrarAMultiUsuario(conn);
+        // Índices (al final: dependen de columnas que crean las migraciones anteriores)
+        CrearIndices(conn);
         // Datos globales iniciales
         SeedConfiguracion(conn);
     }
@@ -196,18 +198,69 @@ public class AppDatabase
                     Tipo         TEXT    NOT NULL DEFAULT 'Débito',
                     Banco        TEXT    NOT NULL DEFAULT '',
                     Activa       INTEGER NOT NULL DEFAULT 1,
-                    SaldoActual  REAL    NOT NULL DEFAULT 0,
+                    SaldoInicial REAL    NOT NULL DEFAULT 0,
                     UNIQUE(UsuarioId, Nombre)
                 )
                 """);
         }
     }
 
+    /// <summary>
+    /// El saldo de una cuenta dejó de ser un contador que se actualizaba a mano en diez sitios
+    /// distintos y pasó a calcularse: <c>SaldoInicial + Σ transacciones de la cuenta</c>.
+    /// Esta migración conserva el valor acumulado que hubiera, convirtiéndolo en saldo inicial
+    /// sólo cuando no puede derivarse de las transacciones existentes.
+    /// </summary>
     private static void MigrarCuentas(SqliteConnection conn)
     {
         var cols = GetColumnas(conn, "Cuentas");
-        if (!cols.Contains("SaldoActual"))
-            AddColumna(conn, "Cuentas", "SaldoActual", "REAL NOT NULL DEFAULT 0");
+
+        if (!cols.Contains("SaldoInicial"))
+        {
+            AddColumna(conn, "Cuentas", "SaldoInicial", "REAL NOT NULL DEFAULT 0");
+
+            // Si venía del esquema anterior, el saldo acumulado que tuviera la cuenta y que NO
+            // se explique por sus transacciones es, por definición, su saldo de apertura.
+            // Ojo: esto corre antes que MigrarTransacciones, así que CuentaId puede no existir
+            // todavía; en ese caso no hay nada que descontar y el acumulado ES el saldo inicial.
+            var transCols = TablaExiste(conn, "Transacciones")
+                ? GetColumnas(conn, "Transacciones")
+                : [];
+
+            if (cols.Contains("SaldoActual") && !transCols.Contains("CuentaId"))
+            {
+                EjecutarNonQuery(conn, "UPDATE Cuentas SET SaldoInicial = SaldoActual");
+            }
+            else if (cols.Contains("SaldoActual"))
+            {
+                EjecutarNonQuery(conn, """
+                    UPDATE Cuentas SET SaldoInicial = SaldoActual - COALESCE(
+                        (SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
+                         FROM Transacciones t WHERE t.CuentaId = Cuentas.Id), 0)
+                    """);
+            }
+        }
+
+        // SaldoActual ya no se escribe nunca: dejarla sería una columna permanentemente obsoleta
+        // que alguien acabaría leyendo. Si el motor no admite DROP COLUMN se ignora sin más.
+        if (cols.Contains("SaldoActual"))
+        {
+            try { EjecutarNonQuery(conn, "ALTER TABLE Cuentas DROP COLUMN SaldoActual"); }
+            catch (SqliteException) { /* queda huérfana pero nadie la lee */ }
+        }
+    }
+
+    /// <summary>
+    /// Índices. El esquema no tenía ninguno; al derivar los saldos, cada lectura de cuentas
+    /// hace un SUM sobre Transacciones y conviene que no sea un recorrido completo.
+    /// </summary>
+    private static void CrearIndices(SqliteConnection conn)
+    {
+        EjecutarNonQuery(conn, """
+            CREATE INDEX IF NOT EXISTS IX_Transacciones_CuentaId   ON Transacciones(CuentaId);
+            CREATE INDEX IF NOT EXISTS IX_Transacciones_TarjetaId  ON Transacciones(TarjetaCreditoId);
+            CREATE INDEX IF NOT EXISTS IX_Transacciones_UsuarioFecha ON Transacciones(UsuarioId, Fecha);
+            """);
     }
 
     private static void InicializarTarjetasCredito(SqliteConnection conn)
@@ -735,14 +788,7 @@ public class AppDatabase
                 ("$m", (double)t.Monto), ("$id", t.TarjetaCreditoId.Value), ("$uid", usuarioId));
         }
 
-        // Actualizar saldo de cuenta bancaria
-        if (t.CuentaId.HasValue)
-        {
-            var delta = t.Tipo == "Ingreso" ? t.Monto : -t.Monto;
-            EjecutarNonQuery(conn,
-                "UPDATE Cuentas SET SaldoActual = SaldoActual + $d WHERE Id=$id",
-                ("$d", (double)delta), ("$id", t.CuentaId.Value));
-        }
+        // El saldo de la cuenta no se toca: se deriva de estas mismas transacciones al leerlo.
     }
 
     public List<Transaccion> ObtenerTransacciones(int usuarioId)
@@ -779,30 +825,22 @@ public class AppDatabase
 
         using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT Tipo, Monto, TarjetaCreditoId, CuentaId FROM Transacciones WHERE Id=$id";
+            cmd.CommandText = "SELECT Tipo, Monto, TarjetaCreditoId FROM Transacciones WHERE Id=$id";
             cmd.Parameters.AddWithValue("$id", id);
             using var r = cmd.ExecuteReader();
             if (r.Read())
             {
-                var tipo     = r.GetString(0);
-                var monto    = r.GetDouble(1);
-                var tarjId   = r.IsDBNull(2) ? (int?)null : r.GetInt32(2);
-                var cuentaId = r.IsDBNull(3) ? (int?)null : r.GetInt32(3);
+                var tipo   = r.GetString(0);
+                var monto  = r.GetDouble(1);
+                var tarjId = r.IsDBNull(2) ? (int?)null : r.GetInt32(2);
 
-                // Revertir saldo de tarjeta de crédito
+                // Revertir saldo de tarjeta de crédito (sigue siendo un contador: ver D3)
                 if (tarjId.HasValue && tipo == "Gasto")
                     EjecutarNonQuery(conn,
                         "UPDATE TarjetasCredito SET SaldoUsado = MAX(0, SaldoUsado - $m) WHERE Id=$id2",
                         ("$m", monto), ("$id2", tarjId.Value));
 
-                // Revertir saldo de cuenta bancaria
-                if (cuentaId.HasValue)
-                {
-                    var delta = tipo == "Ingreso" ? -monto : monto;
-                    EjecutarNonQuery(conn,
-                        "UPDATE Cuentas SET SaldoActual = SaldoActual + $d WHERE Id=$cid",
-                        ("$d", delta), ("$cid", cuentaId.Value));
-                }
+                // El saldo de la cuenta no se revierte: al borrar la fila deja de sumar sola.
             }
         }
 
@@ -947,23 +985,37 @@ public class AppDatabase
 
     // ── Cuentas ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// El saldo se calcula aquí: <c>SaldoInicial + Σ transacciones de la cuenta</c>.
+    /// No existe ningún contador acumulado que mantener en sincronía, así que la deriva entre
+    /// el saldo mostrado y las transacciones es imposible por construcción.
+    /// </summary>
     public List<Cuenta> ObtenerCuentas(int usuarioId)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
-        cmd.CommandText = "SELECT Id,Nombre,Tipo,Banco,Activa,SaldoActual FROM Cuentas WHERE UsuarioId=$uid ORDER BY Activa DESC, Nombre";
+        cmd.CommandText = """
+            SELECT c.Id, c.Nombre, c.Tipo, c.Banco, c.Activa, c.SaldoInicial,
+                   c.SaldoInicial + COALESCE(
+                       (SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
+                        FROM Transacciones t WHERE t.CuentaId = c.Id), 0)
+            FROM Cuentas c
+            WHERE c.UsuarioId = $uid
+            ORDER BY c.Activa DESC, c.Nombre
+            """;
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<Cuenta>();
         using var r = cmd.ExecuteReader();
         while (r.Read())
             list.Add(new Cuenta
             {
-                Id          = r.GetInt32(0),
-                Nombre      = r.GetString(1),
-                Tipo        = r.GetString(2),
-                Banco       = r.GetString(3),
-                Activa      = r.GetInt32(4) == 1,
-                SaldoActual = (decimal)r.GetDouble(5)
+                Id           = r.GetInt32(0),
+                Nombre       = r.GetString(1),
+                Tipo         = r.GetString(2),
+                Banco        = r.GetString(3),
+                Activa       = r.GetInt32(4) == 1,
+                SaldoInicial = (decimal)r.GetDouble(5),
+                SaldoActual  = (decimal)r.GetDouble(6)
             });
         return list;
     }
@@ -972,18 +1024,18 @@ public class AppDatabase
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
-            "INSERT INTO Cuentas (UsuarioId, Nombre, Tipo, Banco, Activa) VALUES ($uid,$n,$t,$b,$a)",
+            "INSERT INTO Cuentas (UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial) VALUES ($uid,$n,$t,$b,$a,$si)",
             ("$uid", usuarioId), ("$n", c.Nombre), ("$t", c.Tipo),
-            ("$b", c.Banco), ("$a", c.Activa ? 1 : 0));
+            ("$b", c.Banco), ("$a", c.Activa ? 1 : 0), ("$si", (double)c.SaldoInicial));
     }
 
     public void ActualizarCuenta(Cuenta c)
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
-            "UPDATE Cuentas SET Nombre=$n, Tipo=$t, Banco=$b, Activa=$a WHERE Id=$id",
+            "UPDATE Cuentas SET Nombre=$n, Tipo=$t, Banco=$b, Activa=$a, SaldoInicial=$si WHERE Id=$id",
             ("$n", c.Nombre), ("$t", c.Tipo), ("$b", c.Banco),
-            ("$a", c.Activa ? 1 : 0), ("$id", c.Id));
+            ("$a", c.Activa ? 1 : 0), ("$si", (double)c.SaldoInicial), ("$id", c.Id));
     }
 
     public void EliminarCuenta(int id)
@@ -1092,10 +1144,6 @@ public class AppDatabase
                     EjecutarNonQuery(conn,
                         "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado - $m WHERE Id=$cid",
                         ("$m", monto), ("$cid", tarjetaId.Value));
-                if (cuentaId.HasValue)
-                    EjecutarNonQuery(conn,
-                        "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$cid",
-                        ("$m", monto), ("$cid", cuentaId.Value));
             }
         }
 
@@ -1164,11 +1212,6 @@ public class AppDatabase
                     "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado + $m WHERE Id=$id",
                     ("$m", (double)datos.Monto), ("$id", tarjetaId.Value));
 
-            // Actualizar saldo de cuenta bancaria
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$id",
-                    ("$m", (double)datos.Monto), ("$id", cuentaId.Value));
         }
         else
         {
@@ -1205,10 +1248,6 @@ public class AppDatabase
                     "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado - $m WHERE Id=$id",
                     ("$m", prevMonto), ("$id", prevTarjetaId.Value));
 
-            if (prevCuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$id",
-                    ("$m", prevMonto), ("$id", prevCuentaId.Value));
 
             EjecutarNonQuery(conn,
                 "UPDATE PagosMensuales SET Pagado=0, MetodoPago='', TransaccionId=NULL WHERE Id=$id",
@@ -1301,10 +1340,6 @@ public class AppDatabase
             foreach (var (transId, monto, cuentaId) in pagos)
             {
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$tid", ("$tid", transId));
-                if (cuentaId.HasValue)
-                    EjecutarNonQuery(conn,
-                        "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$cid",
-                        ("$m", monto), ("$cid", cuentaId.Value));
             }
         }
 
@@ -1367,11 +1402,6 @@ public class AppDatabase
                 "UPDATE PagosMensuales SET Pagado=1, TransaccionId=$tid WHERE Id=$id",
                 ("$tid", newId), ("$id", pagoMensualId));
 
-            // Actualizar saldo de la cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$cid",
-                    ("$m", (double)monto), ("$cid", cuentaId.Value));
         }
         else
         {
@@ -1399,11 +1429,6 @@ public class AppDatabase
             if (tid.HasValue)
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", tid.Value));
 
-            // Revertir saldo de la cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$cid",
-                    ("$m", monto), ("$cid", cuentaId.Value));
 
             EjecutarNonQuery(conn,
                 "UPDATE PagosMensuales SET Pagado=0, TransaccionId=NULL WHERE Id=$id",
@@ -2024,11 +2049,6 @@ public class AppDatabase
             cmdIns.Parameters.AddWithValue("$cuentaId",   cuentaId.HasValue ? cuentaId.Value : DBNull.Value);
             var tid = (int)(long)cmdIns.ExecuteScalar()!;
 
-            // Actualizar saldo de cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$id",
-                    ("$m", (double)monto), ("$id", cuentaId.Value));
 
             // Insertar registro de ingreso directo
             EjecutarNonQuery(conn,
@@ -2068,11 +2088,6 @@ public class AppDatabase
                 }
             }
 
-            // Revertir saldo de cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$id",
-                    ("$m", monto), ("$id", cuentaId.Value));
 
             // Eliminar transacción vinculada
             if (transId.HasValue)
@@ -2169,30 +2184,11 @@ public class AppDatabase
             if (n > 0) Add(sev, area, desc, detalle, n);
         }
 
-        // ── 1. Cuentas: saldo almacenado vs. suma real de sus transacciones ──
-        // Hoy SaldoActual es un contador acumulado que se actualiza a mano en 9 lugares
-        // distintos. Esta comprobación es la que detecta la deriva.
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = """
-                SELECT c.Id, c.Nombre, c.SaldoActual,
-                       COALESCE((SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
-                                 FROM Transacciones t WHERE t.CuentaId = c.Id), 0)
-                FROM Cuentas c
-                """;
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-            {
-                var nombre    = r.GetString(1);
-                var guardado  = (decimal)r.GetDouble(2);
-                var calculado = (decimal)r.GetDouble(3);
-                var deriva    = guardado - calculado;
-                if (Math.Abs(deriva) > 0.01m)
-                    Add(SeveridadProblema.Critico, "Cuentas",
-                        $"El saldo guardado de «{nombre}» no coincide con sus transacciones.",
-                        $"Guardado: {guardado:N2} · Calculado: {calculado:N2} · Deriva: {deriva:N2}");
-            }
-        }
+        // ── 1. Cuentas ──
+        // Ya no hay nada que comprobar aquí: desde la decisión D1 el saldo de una cuenta se
+        // calcula (SaldoInicial + Σ transacciones) en lugar de mantenerse como contador, así
+        // que la deriva entre el saldo mostrado y las transacciones es imposible. La
+        // comprobación que vivía aquí pasaría siempre.
 
         // ── 2. Tarjetas: SaldoUsado vs. cargos del período en curso ──
         // El modelo actual afirma que SaldoUsado son los cargos desde el último corte.
