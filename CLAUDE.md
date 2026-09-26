@@ -85,7 +85,7 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 
 - `Configuracion (Clave, Valor)` — seeded with `moneda='₡'`, `max_usuarios`, `presupuesto_mensual`
 - `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion)` — Rol: "Admin"|"Normal"
-- `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId)`
+- `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId, PagoDeTarjetaId)` — the last two are the D2 axes
 - `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite)`
 - `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial)` — UNIQUE(UsuarioId, Nombre). There is **no stored current balance**: see "Derived balances" below
 - `TarjetasCredito (Id, UsuarioId, Nombre, LimiteCredito, SaldoUsado, DiaCierre, DiaPago, FechaUltimoCorte)` — UNIQUE(UsuarioId, Nombre)
@@ -93,6 +93,31 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 - `PagosMensuales (Id, UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado, MetodoPago, TransaccionId)` — tracks per-month payment of a GastoFijo/IngresoFijo, UNIQUE(UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia)
 - `Categorias (Id, UsuarioId, Nombre)` — UsuarioId=NULL means global (all users see it), UNIQUE(UsuarioId, Nombre)
 - **Control Laboral (hourly-wage timesheet module):** `ConfiguracionLaboral (UsuarioId PK, SalarioPorHora, JornadaSemanal, DiaPago…)`, `RegistrosDiasLaborales (UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas/Nocturnas, HorasDobles, EsFeriado, EsAusencia…)` — UNIQUE(UsuarioId, Fecha), `PeriodosLaborales (UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId)`, `IngresoLaboralDirecto`, `ResumenMensual (UsuarioId, Anio, Mes, Ingresos, Gastos, Balance, BalanceAcumulado, NumTransacciones, FechaCierre…)` — one row per closed month, insert is idempotent (`INSERT OR IGNORE`)
+
+### The two axes (decision D2)
+
+A movement can affect **what you spent**, **what you have left**, or both. Conflating them in a
+single figure was the source of the inconsistencies between screens. `Transaccion` exposes both:
+
+| | `AfectaPresupuesto` | `AfectaEfectivo` |
+|---|---|---|
+| Cash / debit purchase | yes | yes |
+| **Credit card purchase** (`TarjetaCreditoId`) | **yes** | no |
+| **Card payment** (`PagoDeTarjetaId`) | no | **yes** |
+
+- **`AfectaPresupuesto`** (`PagoDeTarjetaId IS NULL`) drives categories, the budget alert,
+  monthly/annual reports, `CerrarMes`, and the PDF. A card payment is not a new expense — it was
+  already counted at purchase, and counting it again would double it.
+- **`AfectaEfectivo`** (`TarjetaCreditoId IS NULL`) drives account balances and the dashboard's
+  *Disponible*. A card purchase does not move money until the card is paid.
+
+Whenever you sum transactions, **say which axis you mean** — never filter on `TarjetaCreditoId`
+by hand for a "totals" query. A row may not be both a card purchase and a card payment;
+`InsertarTransaccion` rejects that.
+
+Before D2, ten places filtered `TarjetaCreditoId IS NULL`, which effectively said "a card
+purchase is nothing": it vanished from every total and reappeared months later under the
+category `Tarjeta`, so the category breakdown and the budget alert were blind to card spending.
 
 ### Derived balances (decision D1)
 

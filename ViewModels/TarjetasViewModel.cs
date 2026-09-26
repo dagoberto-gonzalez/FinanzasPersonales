@@ -308,7 +308,8 @@ public class TarjetasViewModel : BaseViewModel
             Fecha            = DateTime.Today,
             CuentaNombre     = cuenta?.Nombre ?? "Efectivo",
             CuentaId         = cuenta?.Id,
-            TarjetaCreditoId = null
+            TarjetaCreditoId = null,                    // no es una compra con la tarjeta…
+            PagoDeTarjetaId  = _seleccionada.Id         // …es el pago que la salda
         }, _uid);
 
         // Reducir saldo usado directamente

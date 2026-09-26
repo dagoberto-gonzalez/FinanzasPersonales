@@ -397,6 +397,28 @@ public class AppDatabase
         if (!cols.Contains("TarjetaCreditoId")) AddColumna(conn, "Transacciones", "TarjetaCreditoId", "INTEGER");
         if (!cols.Contains("UsuarioId"))        AddColumna(conn, "Transacciones", "UsuarioId",        "INTEGER NOT NULL DEFAULT 1");
         if (!cols.Contains("CuentaId"))         AddColumna(conn, "Transacciones", "CuentaId",         "INTEGER");
+
+        // Decisión D2: qué tarjeta salda este pago. Distingue "compré con la tarjeta" (gasto
+        // que aún no mueve efectivo) de "pagué la tarjeta" (mueve efectivo pero no es un gasto
+        // nuevo: ya se contó al comprar). Antes esto se adivinaba mirando si la categoría decía
+        // "Tarjeta", que es frágil.
+        if (!cols.Contains("PagoDeTarjetaId"))
+        {
+            AddColumna(conn, "Transacciones", "PagoDeTarjetaId", "INTEGER");
+
+            // Los pagos que ya existían los generó TarjetasViewModel.Abonar con una descripción
+            // exacta; sin esto se contarían dos veces (la compra y el pago).
+            EjecutarNonQuery(conn, """
+                UPDATE Transacciones
+                SET PagoDeTarjetaId = (
+                    SELECT tc.Id FROM TarjetasCredito tc
+                    WHERE tc.UsuarioId = Transacciones.UsuarioId
+                      AND Transacciones.Descripcion = 'Pago tarjeta ' || tc.Nombre)
+                WHERE Tipo = 'Gasto' AND Categoria = 'Tarjeta'
+                  AND TarjetaCreditoId IS NULL
+                  AND Descripcion LIKE 'Pago tarjeta %'
+                """);
+        }
     }
 
     private static void MigrarMetasAhorro(SqliteConnection conn)
@@ -755,18 +777,31 @@ public class AppDatabase
 
     public void InsertarTransaccion(Transaccion t, int usuarioId)
     {
-        // Una tarjeta de crédito es una fuente de deuda, no de ingresos. Además, todos los
-        // totales de la aplicación excluyen las transacciones con TarjetaCreditoId, así que un
-        // ingreso así se guardaría y no sumaría en ninguna parte: dinero invisible.
+        // Una tarjeta de crédito es una fuente de deuda, no de ingresos.
         if (t.Tipo == "Ingreso" && t.TarjetaCreditoId.HasValue)
             throw new ArgumentException(
                 "Un ingreso no puede tener una tarjeta de crédito como origen.", nameof(t));
 
+        // Comprar con la tarjeta y pagar la tarjeta son movimientos opuestos: una misma fila no
+        // puede ser los dos, o se contaría en los dos ejes a la vez.
+        if (t.TarjetaCreditoId.HasValue && t.PagoDeTarjetaId.HasValue)
+            throw new ArgumentException(
+                "Una transacción no puede ser a la vez compra con tarjeta y pago de tarjeta.", nameof(t));
+
+        // La categoría «Tarjeta» identifica los pagos de tarjeta, y un pago SIEMPRE tiene que
+        // decir qué tarjeta salda. Si no, se contaría como un gasto nuevo además de la compra
+        // que ya se registró: el mismo dinero dos veces. Los pagos se registran en la pantalla
+        // de Tarjetas, que es la única que conoce el saldo pendiente.
+        if (t.Categoria == "Tarjeta" && !t.PagoDeTarjetaId.HasValue)
+            throw new ArgumentException(
+                "Los pagos de tarjeta se registran desde la pantalla Tarjetas, para que se " +
+                "descuenten del saldo y no se cuenten dos veces.", nameof(t));
+
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId)
-            VALUES ($uid,$tipo,$monto,$cat,$desc,$fecha,$notas,$cuenta,$tarjeta,$cuentaid)
+            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId)
+            VALUES ($uid,$tipo,$monto,$cat,$desc,$fecha,$notas,$cuenta,$tarjeta,$cuentaid,$pagotarjeta)
             """;
         cmd.Parameters.AddWithValue("$uid",      usuarioId);
         cmd.Parameters.AddWithValue("$tipo",     t.Tipo);
@@ -778,6 +813,7 @@ public class AppDatabase
         cmd.Parameters.AddWithValue("$cuenta",   t.CuentaNombre);
         cmd.Parameters.AddWithValue("$tarjeta",  t.TarjetaCreditoId.HasValue ? t.TarjetaCreditoId.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("$cuentaid", t.CuentaId.HasValue ? t.CuentaId.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("$pagotarjeta", t.PagoDeTarjetaId.HasValue ? t.PagoDeTarjetaId.Value : DBNull.Value);
         cmd.ExecuteNonQuery();
 
         // Actualizar saldo de tarjeta de crédito (gastos)
@@ -796,7 +832,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId " +
+            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId " +
             "FROM Transacciones WHERE UsuarioId=$uid ORDER BY Fecha DESC, Id DESC";
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<Transaccion>();
@@ -810,7 +846,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId " +
+            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId " +
             "FROM Transacciones WHERE TarjetaCreditoId=$id ORDER BY Fecha DESC";
         cmd.Parameters.AddWithValue("$id", tarjetaId);
         var list = new List<Transaccion>();
@@ -858,7 +894,8 @@ public class AppDatabase
         Notas            = r.IsDBNull(6) ? "" : r.GetString(6),
         CuentaNombre     = r.IsDBNull(7) ? "Efectivo" : r.GetString(7),
         TarjetaCreditoId = r.IsDBNull(8) ? null : r.GetInt32(8),
-        CuentaId         = r.IsDBNull(9) ? null : r.GetInt32(9)
+        CuentaId         = r.IsDBNull(9) ? null : r.GetInt32(9),
+        PagoDeTarjetaId  = r.IsDBNull(10) ? null : r.GetInt32(10)
     };
 
     // ── Metas de Ahorro ───────────────────────────────────────────────────────
@@ -1486,7 +1523,8 @@ public class AppDatabase
                    SUM(CASE WHEN Tipo='Ingreso' THEN Monto ELSE 0 END) AS Ingresos,
                    SUM(CASE WHEN Tipo='Gasto'   THEN Monto ELSE 0 END) AS Gastos
             FROM Transacciones
-            WHERE Fecha >= $desde AND TarjetaCreditoId IS NULL AND UsuarioId = $uid
+            WHERE Fecha >= $desde AND UsuarioId = $uid
+              AND PagoDeTarjetaId IS NULL   -- eje presupuesto: en qué se gastó
             GROUP BY Periodo
             ORDER BY Periodo
             """;
@@ -1768,7 +1806,8 @@ public class AppDatabase
         cmd.CommandText = """
             SELECT Tipo, SUM(Monto), COUNT(*)
             FROM Transacciones
-            WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL
+            WHERE UsuarioId=$uid
+              AND PagoDeTarjetaId IS NULL   -- eje presupuesto: qué se ganó y en qué se gastó
               AND Fecha >= $desde AND Fecha <= $hasta
             GROUP BY Tipo
             """;
@@ -1803,7 +1842,8 @@ public class AppDatabase
             cmd.CommandText = """
                 SELECT Tipo, SUM(Monto), COUNT(*)
                 FROM Transacciones
-                WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL
+                WHERE UsuarioId=$uid
+                  AND PagoDeTarjetaId IS NULL   -- eje presupuesto
                   AND Fecha >= $desde AND Fecha <= $hasta
                 GROUP BY Tipo
                 """;
@@ -1826,7 +1866,8 @@ public class AppDatabase
             cmd.CommandText = """
                 SELECT COALESCE(SUM(CASE WHEN Tipo='Ingreso' THEN Monto ELSE -Monto END), 0)
                 FROM Transacciones
-                WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL AND Fecha <= $hasta
+                WHERE UsuarioId=$uid AND Fecha <= $hasta
+                  AND TarjetaCreditoId IS NULL   -- eje efectivo: cuánto quedó de verdad
                 """;
             cmd.Parameters.AddWithValue("$uid",   usuarioId);
             cmd.Parameters.AddWithValue("$hasta", hasta);
@@ -2327,9 +2368,11 @@ public class AppDatabase
                 var desde = new DateTime(c.Anio, c.Mes, 1);
                 var hasta = desde.AddMonths(1).AddDays(-1);
 
+                // Mismo eje que usa CerrarMes al guardar el resumen (presupuesto), o la
+                // comprobación reportaría desfases que no existen.
                 decimal Total(string tipo) => (decimal)EjecutarScalar<double>(conn,
                     "SELECT COALESCE(SUM(Monto),0) FROM Transacciones " +
-                    "WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL AND Tipo=$tipo " +
+                    "WHERE UsuarioId=$uid AND PagoDeTarjetaId IS NULL AND Tipo=$tipo " +
                     "AND Fecha >= $desde AND Fecha <= $hasta",
                     ("$uid", c.Uid), ("$tipo", tipo),
                     ("$desde", desde.ToString("yyyy-MM-dd")), ("$hasta", hasta.ToString("yyyy-MM-dd")));

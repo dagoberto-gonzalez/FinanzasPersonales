@@ -41,7 +41,10 @@
             <!-- Formulario nuevo gasto fijo -->
             <Border Style="{StaticResource Card}" Margin="0,0,0,24">
                 <StackPanel>
-                    <TextBlock Text="Agregar gasto fijo" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,16"/>
+                    <TextBlock Text="Agregar gasto fijo" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Text="El pago de una tarjeta de crédito no va aquí: se registra en la pantalla Tarjetas, donde se descuenta del saldo pendiente. Lo que compraste con la tarjeta ya cuenta como gasto en el mes de la compra."
+                               Foreground="{StaticResource TextMutedBrush}"
+                               FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>

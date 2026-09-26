@@ -267,10 +267,16 @@ public class TransaccionesViewModel : BaseViewModel
     {
         var cats = _db.ObtenerCategorias(_uid);
 
+        // «Tarjeta» queda fuera del formulario: marca los pagos de tarjeta, que se registran en
+        // la pantalla Tarjetas para que descuenten del saldo. Registrar uno a mano aquí lo
+        // contaría como un gasto nuevo además de la compra que ya se registró. Sí se mantiene
+        // en el filtro, para poder consultar los pagos hechos.
+        var paraFormulario = cats.Where(c => c != "Tarjeta").ToList();
+
         CategoriasForm.Clear();
-        foreach (var c in cats) CategoriasForm.Add(c);
-        if (string.IsNullOrEmpty(_categoria) || !cats.Contains(_categoria))
-            Categoria = cats.FirstOrDefault() ?? string.Empty;
+        foreach (var c in paraFormulario) CategoriasForm.Add(c);
+        if (string.IsNullOrEmpty(_categoria) || !paraFormulario.Contains(_categoria))
+            Categoria = paraFormulario.FirstOrDefault() ?? string.Empty;
 
         CategoriasFiltro.Clear();
         CategoriasFiltro.Add("Todas");
