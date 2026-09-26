@@ -23,18 +23,9 @@ public class VerificarIntegridadTests
     // La comprobación de deriva de saldo en cuentas se retiró con la decisión D1: el saldo se
     // calcula al leerlo, así que no puede desviarse. Ver Bloque2D1Tests.
 
-    [Fact]
-    public void DetectaDerivaDeSaldoEnTarjeta()
-    {
-        using var t = new BaseDePrueba();
-        var tarjetaId = t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
-
-        t.Sql($"UPDATE TarjetasCredito SET SaldoUsado = 12345 WHERE Id = {tarjetaId}");
-
-        var p = Buscar(t.Db.VerificarIntegridad(), "Tarjetas", "no coincide");
-        Assert.NotNull(p);
-        Assert.Equal(SeveridadProblema.Critico, p!.Severidad);
-    }
+    // La comprobación de deriva de saldo en tarjetas se retiró con la decisión D3, por el mismo
+    // motivo que la de cuentas en D1: el saldo se calcula, así que no puede desviarse. Lo que sí
+    // se comprueba ahora es una deuda negativa — ver Bloque2D3Tests.AvisaSiSePagoMasDeLoComprado.
 
     [Fact]
     public void DetectaTransaccionConCuentaInexistente()
@@ -171,13 +162,20 @@ public class VerificarIntegridadTests
     public void VerificarIntegridad_NoModificaLaBase()
     {
         using var t = new BaseDePrueba();
-        var tarjetaId = t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
-        t.Sql($"UPDATE TarjetasCredito SET SaldoUsado = 777 WHERE Id = {tarjetaId}");
+        t.Db.InsertarCuenta(new Cuenta { Nombre = "Principal", SaldoInicial = 777 }, t.UsuarioId);
+        var cuentaId = t.Db.ObtenerCuentas(t.UsuarioId).Single().Id;
+
+        // Un dato roto a propósito: transacción que apunta a una cuenta inexistente.
+        t.Sql($"""
+            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,CuentaId)
+            VALUES ({t.UsuarioId},'Gasto',100,'Otros','fantasma','2026-09-01',9999)
+            """);
 
         t.Db.VerificarIntegridad();
         t.Db.VerificarIntegridad();
 
-        // El diagnóstico reporta, nunca repara.
-        Assert.Equal(777.0, t.Escalar<double>($"SELECT SaldoUsado FROM TarjetasCredito WHERE Id={tarjetaId}"));
+        // El diagnóstico reporta, nunca repara: ni borra la fila rota ni toca el saldo.
+        Assert.Equal(1, t.Escalar<long>("SELECT COUNT(*) FROM Transacciones WHERE CuentaId=9999"));
+        Assert.Equal(777.0, t.Escalar<double>($"SELECT SaldoInicial FROM Cuentas WHERE Id={cuentaId}"));
     }
 }

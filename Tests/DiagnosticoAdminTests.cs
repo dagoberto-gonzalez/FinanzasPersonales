@@ -41,8 +41,12 @@ public class DiagnosticoAdminTests
     public void ConProblemaCritico_ResumenEnRojoYListaVisible()
     {
         using var t = new BaseDePrueba();
-        var tarjetaId = t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
-        t.Sql($"UPDATE TarjetasCredito SET SaldoUsado = 50000 WHERE Id = {tarjetaId}");
+
+        // Una referencia rota: transacción que apunta a una cuenta que ya no existe.
+        t.Sql($"""
+            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,CuentaId)
+            VALUES ({t.UsuarioId},'Gasto',100,'Otros','fantasma','2026-09-01',9999)
+            """);
 
         var vm = new AdminViewModel(t.Db);
         vm.EjecutarDiagnosticoCommand.Execute(null);

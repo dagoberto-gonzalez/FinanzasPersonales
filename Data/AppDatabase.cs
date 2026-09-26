@@ -273,10 +273,8 @@ public class AppDatabase
                     UsuarioId        INTEGER NOT NULL DEFAULT 1,
                     Nombre           TEXT    NOT NULL,
                     LimiteCredito    REAL    NOT NULL DEFAULT 0,
-                    SaldoUsado       REAL    NOT NULL DEFAULT 0,
                     DiaCierre        INTEGER NOT NULL DEFAULT 15,
                     DiaPago          INTEGER NOT NULL DEFAULT 5,
-                    FechaUltimoCorte TEXT    NOT NULL DEFAULT '',
                     UNIQUE(UsuarioId, Nombre)
                 )
                 """);
@@ -286,10 +284,6 @@ public class AppDatabase
     private static void MigrarTarjetas(SqliteConnection conn)
     {
         var cols = GetColumnas(conn, "TarjetasCredito");
-
-        // Agregar FechaUltimoCorte si no existe (versión vieja)
-        if (!cols.Contains("FechaUltimoCorte"))
-            AddColumna(conn, "TarjetasCredito", "FechaUltimoCorte", "TEXT NOT NULL DEFAULT ''");
 
         // Si no tiene UsuarioId necesitamos recrear (para quitar UNIQUE(Nombre) y agregar UsuarioId)
         if (!cols.Contains("UsuarioId"))
@@ -320,6 +314,19 @@ public class AppDatabase
                 tr.Commit();
             }
             catch { tr.Rollback(); throw; }
+        }
+
+        // Decisión D3: SaldoUsado pasó a calcularse (compras − pagos) y FechaUltimoCorte dejó
+        // de tener sentido, porque el inicio del período sale de DiaCierre. Dejarlas sería
+        // arrastrar dos columnas permanentemente obsoletas que alguien acabaría leyendo.
+        // Va al final y releyendo las columnas: el bloque de arriba puede haber recreado la
+        // tabla con el esquema antiguo.
+        var actuales = GetColumnas(conn, "TarjetasCredito");
+        foreach (var obsoleta in new[] { "SaldoUsado", "FechaUltimoCorte" })
+        {
+            if (!actuales.Contains(obsoleta)) continue;
+            try { EjecutarNonQuery(conn, $"ALTER TABLE TarjetasCredito DROP COLUMN {obsoleta}"); }
+            catch (SqliteException) { /* el motor no admite DROP COLUMN; nadie la lee */ }
         }
     }
 
@@ -816,15 +823,8 @@ public class AppDatabase
         cmd.Parameters.AddWithValue("$pagotarjeta", t.PagoDeTarjetaId.HasValue ? t.PagoDeTarjetaId.Value : DBNull.Value);
         cmd.ExecuteNonQuery();
 
-        // Actualizar saldo de tarjeta de crédito (gastos)
-        if (t.TarjetaCreditoId.HasValue && t.Tipo == "Gasto")
-        {
-            EjecutarNonQuery(conn,
-                "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado + $m WHERE Id=$id AND UsuarioId=$uid",
-                ("$m", (double)t.Monto), ("$id", t.TarjetaCreditoId.Value), ("$uid", usuarioId));
-        }
-
-        // El saldo de la cuenta no se toca: se deriva de estas mismas transacciones al leerlo.
+        // No se ajusta ningún contador: ni el saldo de la cuenta ni el de la tarjeta.
+        // Los dos se derivan de estas mismas filas al leerlos (decisiones D1 y D3).
     }
 
     public List<Transaccion> ObtenerTransacciones(int usuarioId)
@@ -855,31 +855,14 @@ public class AppDatabase
         return list;
     }
 
+    /// <summary>
+    /// Borrar es sólo borrar. No hay saldos que revertir: tanto el de la cuenta (D1) como el de
+    /// la tarjeta (D3) se derivan de las transacciones, así que al desaparecer la fila dejan de
+    /// sumar por su cuenta. Antes esto leía la transacción para deshacer dos contadores a mano.
+    /// </summary>
     public void EliminarTransaccion(int id)
     {
         using var conn = Abrir();
-
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = "SELECT Tipo, Monto, TarjetaCreditoId FROM Transacciones WHERE Id=$id";
-            cmd.Parameters.AddWithValue("$id", id);
-            using var r = cmd.ExecuteReader();
-            if (r.Read())
-            {
-                var tipo   = r.GetString(0);
-                var monto  = r.GetDouble(1);
-                var tarjId = r.IsDBNull(2) ? (int?)null : r.GetInt32(2);
-
-                // Revertir saldo de tarjeta de crédito (sigue siendo un contador: ver D3)
-                if (tarjId.HasValue && tipo == "Gasto")
-                    EjecutarNonQuery(conn,
-                        "UPDATE TarjetasCredito SET SaldoUsado = MAX(0, SaldoUsado - $m) WHERE Id=$id2",
-                        ("$m", monto), ("$id2", tarjId.Value));
-
-                // El saldo de la cuenta no se revierte: al borrar la fila deja de sumar sola.
-            }
-        }
-
         EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", id));
     }
 
@@ -952,49 +935,58 @@ public class AppDatabase
 
     // ── Tarjetas de Crédito ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// Los saldos se calculan (decisión D3):
+    /// <list type="bullet">
+    /// <item><c>SaldoUsado</c> = compras con la tarjeta − pagos hechos. Es la deuda real.</item>
+    /// <item><c>ConsumoPeriodo</c> = compras desde el último corte. Informativo.</item>
+    /// </list>
+    /// <para>
+    /// Antes <c>SaldoUsado</c> era un contador que esta misma función ponía a cero al cruzar el
+    /// día de corte. Pero el corte no es cuando se paga: entre el corte y el día de pago la
+    /// aplicación afirmaba que no se debía nada. Y al ser un UPDATE dentro de una lectura,
+    /// bastaba abrir cualquier pantalla ese día para perder el dato.
+    /// </para>
+    /// </summary>
     public List<TarjetaCredito> ObtenerTarjetas(int usuarioId)
     {
         using var conn = Abrir();
-        using var cmd  = conn.CreateCommand();
-        cmd.CommandText = "SELECT Id,Nombre,LimiteCredito,SaldoUsado,DiaCierre,DiaPago,FechaUltimoCorte FROM TarjetasCredito WHERE UsuarioId=$uid";
-        cmd.Parameters.AddWithValue("$uid", usuarioId);
+
+        // Primero los datos fijos; el corte depende de DiaCierre y se calcula en el modelo.
         var list = new List<TarjetaCredito>();
-        using var r = cmd.ExecuteReader();
-        while (r.Read())
+        using (var cmd = conn.CreateCommand())
         {
-            var t = new TarjetaCredito
-            {
-                Id               = r.GetInt32(0),
-                Nombre           = r.GetString(1),
-                LimiteCredito    = (decimal)r.GetDouble(2),
-                SaldoUsado       = (decimal)r.GetDouble(3),
-                DiaCierre        = r.GetInt32(4),
-                DiaPago          = r.GetInt32(5),
-                FechaUltimoCorte = r.IsDBNull(6) || string.IsNullOrEmpty(r.GetString(6))
-                    ? DateTime.MinValue
-                    : DateTime.Parse(r.GetString(6))
-            };
-            list.Add(t);
+            cmd.CommandText = """
+                SELECT Id, Nombre, LimiteCredito, DiaCierre, DiaPago,
+                       COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.TarjetaCreditoId = TarjetasCredito.Id AND t.Tipo = 'Gasto'), 0)
+                     - COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.PagoDeTarjetaId  = TarjetasCredito.Id), 0)
+                FROM TarjetasCredito
+                WHERE UsuarioId = $uid
+                """;
+            cmd.Parameters.AddWithValue("$uid", usuarioId);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new TarjetaCredito
+                {
+                    Id            = r.GetInt32(0),
+                    Nombre        = r.GetString(1),
+                    LimiteCredito = (decimal)r.GetDouble(2),
+                    DiaCierre     = r.GetInt32(3),
+                    DiaPago       = r.GetInt32(4),
+                    SaldoUsado    = (decimal)r.GetDouble(5)
+                });
         }
 
-        // Auto-reset al cruzar la fecha de cierre de período
+        // Consumo del período en curso: compras desde el último corte.
         foreach (var t in list)
-            AutoRenovarPeriodo(conn, t);
+            t.ConsumoPeriodo = (decimal)EjecutarScalar<double>(conn,
+                "SELECT COALESCE(SUM(Monto), 0) FROM Transacciones " +
+                "WHERE TarjetaCreditoId = $id AND Tipo = 'Gasto' AND Fecha >= $desde",
+                ("$id", t.Id), ("$desde", t.InicioPeriodo.ToString("yyyy-MM-dd")));
 
         return list;
-    }
-
-    private void AutoRenovarPeriodo(SqliteConnection conn, TarjetaCredito t)
-    {
-        var inicioPeriodo = t.InicioPeriodo;
-        if (t.FechaUltimoCorte < inicioPeriodo.Date)
-        {
-            EjecutarNonQuery(conn,
-                "UPDATE TarjetasCredito SET SaldoUsado=0, FechaUltimoCorte=$f WHERE Id=$id",
-                ("$f", inicioPeriodo.ToString("yyyy-MM-dd")), ("$id", t.Id));
-            t.SaldoUsado       = 0;
-            t.FechaUltimoCorte = inicioPeriodo;
-        }
     }
 
     public void InsertarTarjeta(TarjetaCredito t, int usuarioId)
@@ -1009,8 +1001,9 @@ public class AppDatabase
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
-            "UPDATE TarjetasCredito SET Nombre=$nombre, LimiteCredito=$lim, SaldoUsado=$saldo, DiaCierre=$cierre, DiaPago=$pago WHERE Id=$id",
-            ("$nombre", t.Nombre), ("$lim", (double)t.LimiteCredito), ("$saldo", (double)t.SaldoUsado),
+            // SaldoUsado no se escribe: se deriva de las compras y los pagos.
+            "UPDATE TarjetasCredito SET Nombre=$nombre, LimiteCredito=$lim, DiaCierre=$cierre, DiaPago=$pago WHERE Id=$id",
+            ("$nombre", t.Nombre), ("$lim", (double)t.LimiteCredito),
             ("$cierre", t.DiaCierre), ("$pago", t.DiaPago), ("$id", t.Id));
     }
 
@@ -1081,13 +1074,9 @@ public class AppDatabase
         EjecutarNonQuery(conn, "DELETE FROM Cuentas WHERE Id=$id", ("$id", id));
     }
 
-    public void AbonarTarjeta(int tarjetaId, decimal monto)
-    {
-        using var conn = Abrir();
-        EjecutarNonQuery(conn,
-            "UPDATE TarjetasCredito SET SaldoUsado = MAX(0, SaldoUsado - $m) WHERE Id=$id",
-            ("$m", (double)monto), ("$id", tarjetaId));
-    }
+    // AbonarTarjeta() desapareció con la decisión D3: el abono ya se registra como una
+    // transacción con PagoDeTarjetaId, y el saldo de la tarjeta se deriva de esas mismas filas.
+    // No queda ningún contador que ajustar aparte.
 
     // ── Gastos Fijos ──────────────────────────────────────────────────────────
 
@@ -1177,10 +1166,6 @@ public class AppDatabase
             foreach (var (transId, monto, cuentaId, tarjetaId) in pagos)
             {
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$tid", ("$tid", transId));
-                if (tarjetaId.HasValue)
-                    EjecutarNonQuery(conn,
-                        "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado - $m WHERE Id=$cid",
-                        ("$m", monto), ("$cid", tarjetaId.Value));
             }
         }
 
@@ -1243,11 +1228,6 @@ public class AppDatabase
                 "UPDATE PagosMensuales SET Pagado=1, MetodoPago=$m, TransaccionId=$tid WHERE Id=$id",
                 ("$m", metodoPago), ("$tid", newTransId), ("$id", pagoMensualId));
 
-            // Actualizar saldo de tarjeta de crédito
-            if (tarjetaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado + $m WHERE Id=$id",
-                    ("$m", (double)datos.Monto), ("$id", tarjetaId.Value));
 
         }
         else
@@ -1280,10 +1260,6 @@ public class AppDatabase
             if (prevTransId.HasValue)
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", prevTransId.Value));
 
-            if (prevTarjetaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado - $m WHERE Id=$id",
-                    ("$m", prevMonto), ("$id", prevTarjetaId.Value));
 
 
             EjecutarNonQuery(conn,
@@ -2231,30 +2207,28 @@ public class AppDatabase
         // que la deriva entre el saldo mostrado y las transacciones es imposible. La
         // comprobación que vivía aquí pasaría siempre.
 
-        // ── 2. Tarjetas: SaldoUsado vs. cargos del período en curso ──
-        // El modelo actual afirma que SaldoUsado son los cargos desde el último corte.
-        // Se consulta la tabla directamente: ObtenerTarjetas() escribiría (AutoRenovarPeriodo).
+        // ── 2. Tarjetas ──
+        // Igual que con las cuentas en D1: desde D3 el saldo de la tarjeta se calcula
+        // (compras − pagos), así que no puede desviarse y la comprobación que vivía aquí
+        // pasaría siempre. Lo que sí tiene sentido es avisar de una deuda imposible.
         using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT Id, Nombre, SaldoUsado, DiaCierre FROM TarjetasCredito";
-            var tarjetas = new List<(int Id, string Nombre, decimal Saldo, int DiaCierre)>();
-            using (var r = cmd.ExecuteReader())
-                while (r.Read())
-                    tarjetas.Add((r.GetInt32(0), r.GetString(1), (decimal)r.GetDouble(2), r.GetInt32(3)));
-
-            foreach (var t in tarjetas)
+            cmd.CommandText = """
+                SELECT tc.Nombre,
+                       COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.TarjetaCreditoId = tc.Id AND t.Tipo = 'Gasto'), 0)
+                     - COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.PagoDeTarjetaId  = tc.Id), 0)
+                FROM TarjetasCredito tc
+                """;
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
             {
-                var inicioPeriodo = new TarjetaCredito { DiaCierre = t.DiaCierre }.InicioPeriodo;
-                var cargos = (decimal)EjecutarScalar<double>(conn,
-                    "SELECT COALESCE(SUM(Monto), 0) FROM Transacciones " +
-                    "WHERE TarjetaCreditoId = $id AND Tipo = 'Gasto' AND Fecha >= $desde",
-                    ("$id", t.Id), ("$desde", inicioPeriodo.ToString("yyyy-MM-dd")));
-
-                var deriva = t.Saldo - cargos;
-                if (Math.Abs(deriva) > 0.01m)
-                    Add(SeveridadProblema.Critico, "Tarjetas",
-                        $"El saldo usado de «{t.Nombre}» no coincide con los cargos del período.",
-                        $"Guardado: {t.Saldo:N2} · Cargos desde {inicioPeriodo:dd/MM/yyyy}: {cargos:N2} · Deriva: {deriva:N2}");
+                var saldo = (decimal)r.GetDouble(1);
+                if (saldo < -0.01m)
+                    Add(SeveridadProblema.Advertencia, "Tarjetas",
+                        $"Se ha pagado más de lo comprado en «{r.GetString(0)}».",
+                        $"Saldo resultante: {saldo:N2}. Suele significar que falta registrar compras.");
             }
         }
 

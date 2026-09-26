@@ -149,7 +149,7 @@
                                                FontSize="12" FontWeight="SemiBold"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1">
-                                    <TextBlock Text="USADO" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                    <TextBlock Text="SE DEBE" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
                                     <TextBlock Text="{Binding SaldoUsado, StringFormat='₡{0:N0}'}"
                                                Foreground="{StaticResource RedBrush}" FontWeight="SemiBold" FontSize="12"/>
                                 </StackPanel>
@@ -261,10 +261,19 @@
                         <StackPanel>
                             <TextBlock Text="Registrar pago" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <TextBlock Foreground="{StaticResource TextMutedBrush}" FontSize="12"
-                                       TextWrapping="Wrap" Margin="0,0,0,14">
-                                <Run Text="Saldo pendiente: "/>
+                                       TextWrapping="Wrap" Margin="0,0,0,2">
+                                <Run Text="Se debe: "/>
                                 <Run Text="{Binding Seleccionada.SaldoUsado, StringFormat='₡{0:N0}'}"
                                      Foreground="{StaticResource RedBrush}" FontWeight="SemiBold"/>
+                            </TextBlock>
+
+                            <!-- Dos números distintos: lo que se debe incluye períodos anteriores
+                                 sin pagar; el consumo es sólo lo comprado desde el último corte. -->
+                            <TextBlock Foreground="{StaticResource TextMutedBrush}" FontSize="12"
+                                       TextWrapping="Wrap" Margin="0,0,0,14">
+                                <Run Text="Consumido en este período: "/>
+                                <Run Text="{Binding Seleccionada.ConsumoPeriodo, StringFormat='₡{0:N0}'}"
+                                     FontWeight="SemiBold"/>
                             </TextBlock>
 
                             <TextBlock Text="Monto del pago" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>

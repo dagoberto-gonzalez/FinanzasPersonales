@@ -30,9 +30,10 @@ deliberately **no `.sln`**, so bare `dotnet build` still means "build the app" (
 - `RutasDeDineroTests` — characterization of the money paths that work today. These are the
   safety net for making `Cuentas.SaldoActual` / `TarjetasCredito.SaldoUsado` derived values.
   **They must stay green through that refactor.**
-- `BugsConocidosTests` — these assert **current broken behaviour** on purpose, as executable
-  proof each defect is real. When a bug is fixed, invert the assertion and move the test to
-  `RutasDeDineroTests`. One of these going red is the signal that a fix landed.
+- `Bloque1RegresionTests` / `Bloque2D1Tests` / `Bloque2D2Tests` / `Bloque2D3Tests` — regressions
+  for each fixed defect. Several began life in a `BugsConocidosTests` file that asserted the
+  broken behaviour on purpose; that file is gone now that no known defect is left open. If a
+  defect is ever parked again, reuse the convention: assert the breakage, then invert it.
 - `VerificarIntegridadTests` — validates the verifier itself by injecting known corruption.
 
 ### Installer
@@ -88,7 +89,7 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 - `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId, PagoDeTarjetaId)` — the last two are the D2 axes
 - `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite)`
 - `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial)` — UNIQUE(UsuarioId, Nombre). There is **no stored current balance**: see "Derived balances" below
-- `TarjetasCredito (Id, UsuarioId, Nombre, LimiteCredito, SaldoUsado, DiaCierre, DiaPago, FechaUltimoCorte)` — UNIQUE(UsuarioId, Nombre)
+- `TarjetasCredito (Id, UsuarioId, Nombre, LimiteCredito, DiaCierre, DiaPago)` — UNIQUE(UsuarioId, Nombre). No stored balance: see "Derived balances"
 - `GastosFijos` / `IngresosFijos (Id, UsuarioId, Nombre, Monto, Dia*Vencimiento|Ingreso, Dia*2, Activo)`
 - `PagosMensuales (Id, UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado, MetodoPago, TransaccionId)` — tracks per-month payment of a GastoFijo/IngresoFijo, UNIQUE(UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia)
 - `Categorias (Id, UsuarioId, Nombre)` — UsuarioId=NULL means global (all users see it), UNIQUE(UsuarioId, Nombre)
@@ -136,10 +137,23 @@ Practical consequences when touching this code:
 - Indexes in `CrearIndices()` (notably `IX_Transacciones_CuentaId`) are what keep the per-read
   `SUM` cheap. Keep them.
 
-`TarjetasCredito.SaldoUsado` is **still a manually maintained counter** — that is decision D3,
-not yet taken. Marking a `GastoFijo`/`IngresoFijo` paid in `PagosMensuales` still creates a
-linked `Transaccion` (`TransaccionId`); unmarking deletes it, and the account balance follows
-on its own.
+**Card balances are derived too (decision D3).** `ObtenerTarjetas` returns two different
+figures, which used to be collapsed into one:
+
+- **`SaldoUsado`** — all purchases minus all payments. The debt actually owed.
+- **`ConsumoPeriodo`** — purchases since the last `DiaCierre`. Informational only.
+
+`AutoRenovarPeriodo` is gone. It zeroed `SaldoUsado` on the closing date, but the closing date
+is not when you pay: between the cut and the payment day the app claimed you owed nothing. Worse,
+it was an `UPDATE` inside `ObtenerTarjetas`, so merely opening a screen on the wrong day
+destroyed the figure. Reading never writes now, and `FechaUltimoCorte` no longer exists —
+the period start comes from `DiaCierre` via `TarjetaCredito.InicioPeriodo`.
+
+`AbonarTarjeta()` is gone as well: a payment is just a transaction carrying `PagoDeTarjetaId`.
+
+Marking a `GastoFijo`/`IngresoFijo` paid in `PagosMensuales` still creates a linked
+`Transaccion` (`TransaccionId`); unmarking deletes it, and every balance follows on its own.
+`EliminarTransaccion` is now a plain `DELETE` — there is nothing left to revert.
 
 ## Invariants worth knowing
 

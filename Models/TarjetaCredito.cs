@@ -5,12 +5,25 @@ public class TarjetaCredito
     public int      Id                { get; set; }
     public string   Nombre            { get; set; } = string.Empty;
     public decimal  LimiteCredito     { get; set; }
+    /// <summary>
+    /// Deuda real pendiente: compras menos pagos. Calculado por
+    /// <c>AppDatabase.ObtenerTarjetas</c> — no se almacena, asignarlo no persiste nada.
+    /// </summary>
     public decimal  SaldoUsado        { get; set; }
+
+    /// <summary>
+    /// Compras desde el último corte. Es informativo: lo que se lleva consumido del período
+    /// en curso, que no es lo mismo que lo que se debe (el corte anterior puede estar sin pagar).
+    /// </summary>
+    public decimal  ConsumoPeriodo    { get; set; }
+
     public int      DiaCierre         { get; set; }
     public int      DiaPago           { get; set; }
-    public DateTime FechaUltimoCorte  { get; set; } = DateTime.MinValue;
 
     public decimal SaldoDisponible => LimiteCredito - SaldoUsado;
+
+    public string SaldoUsadoTexto     => $"₡{SaldoUsado:N0}";
+    public string ConsumoPeriodoTexto => $"₡{ConsumoPeriodo:N0}";
     public double  PorcentajeUso   => LimiteCredito > 0
         ? Math.Min(100.0, (double)(SaldoUsado / LimiteCredito) * 100.0) : 0;
 

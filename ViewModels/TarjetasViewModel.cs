@@ -312,9 +312,7 @@ public class TarjetasViewModel : BaseViewModel
             PagoDeTarjetaId  = _seleccionada.Id         // …es el pago que la salda
         }, _uid);
 
-        // Reducir saldo usado directamente
-        _db.AbonarTarjeta(_seleccionada.Id, monto);
-
+        // No hay nada más que hacer: el saldo de la tarjeta sale de esta misma transacción.
         AbonoMonto = string.Empty;
         Cargar();
     }

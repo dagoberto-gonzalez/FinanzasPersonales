@@ -80,12 +80,9 @@ public class RutasDeDineroTests
         var cuentaId  = CrearCuenta(t);
         var tarjetaId = (int)t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
 
-        // Una tarjeta recién sembrada tiene FechaUltimoCorte vacía, así que la PRIMERA lectura
-        // dispara AutoRenovarPeriodo y pone el saldo en cero. La app hace esto en cada pantalla.
-        // Este "asiento" artificial desaparece al aplicar la decisión D3 del Bloque 2.
-        // Ver BugsConocidosTests.Bug_2_1_LeerLasTarjetasBorraElSaldoUsado.
-        t.Db.ObtenerTarjetas(t.UsuarioId);
-
+        // Aquí hacía falta un "asiento" artificial: la primera lectura de una tarjeta recién
+        // creada disparaba AutoRenovarPeriodo y ponía el saldo en cero. Con D3 leer ya no
+        // escribe, así que sobra. Ver Bloque2D3Tests.LeerLasTarjetasNoBorraElSaldo.
         t.Db.InsertarTransaccion(new Transaccion
         {
             Tipo = "Gasto", Monto = 30000, Categoria = "Tecnología",

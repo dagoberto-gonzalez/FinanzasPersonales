@@ -8,6 +8,7 @@ namespace FinanzasPersonales.Tests;
 /// <summary>
 /// Regresiones de los defectos corregidos en el Bloque 1. Cada una nació como prueba en
 /// <c>BugsConocidosTests</c> afirmando el comportamiento roto; aquí afirman el correcto.
+/// Ese archivo ya no existe: no queda ningún defecto conocido sin corregir.
 /// </summary>
 public class Bloque1RegresionTests
 {
@@ -275,15 +276,25 @@ public class Bloque1RegresionTests
     {
         using var t = new BaseDePrueba();
         t.Db.InsertarCuenta(new Cuenta { Nombre = "Principal" }, t.UsuarioId);
+        var tarjetaId = (int)t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
+
+        // Primero hay algo que deber: pagar una tarjeta sin compras dejaría saldo negativo,
+        // y el verificador avisa de eso con razón.
+        t.Db.InsertarTransaccion(new Transaccion
+        {
+            Tipo = "Gasto", Monto = 50000, Categoria = "Tecnología",
+            Fecha = DateTime.Today, TarjetaCreditoId = tarjetaId
+        }, t.UsuarioId);
 
         var vm = new ViewModels.TarjetasViewModel(t.Db, t.UsuarioId);
-        vm.Seleccionada = vm.Tarjetas.First();
+        vm.Seleccionada = vm.Tarjetas.First(x => x.Id == tarjetaId);
         vm.CuentaAbono  = vm.CuentasDisponibles.Single();
         vm.AbonoMonto   = "50.000";          // con separador de miles, como se teclea
 
         vm.AbonarCommand.Execute(null);
 
-        var movimiento = t.Db.ObtenerTransacciones(t.UsuarioId).Single();
+        var movimiento = t.Db.ObtenerTransacciones(t.UsuarioId)
+                          .Single(x => x.PagoDeTarjetaId is not null);
         Assert.Equal(50000m, movimiento.Monto);
         Assert.Equal("Principal", movimiento.CuentaNombre);   // antes: "Banco BAC" fijo
         Assert.NotNull(movimiento.CuentaId);                  // antes: null, no descontaba
@@ -297,15 +308,23 @@ public class Bloque1RegresionTests
     public void AbonarTarjeta_SinCuenta_SeRegistraComoEfectivo()
     {
         using var t = new BaseDePrueba();
+        var tarjetaId = (int)t.Escalar<long>("SELECT Id FROM TarjetasCredito LIMIT 1");
+
+        t.Db.InsertarTransaccion(new Transaccion
+        {
+            Tipo = "Gasto", Monto = 10000, Categoria = "Tecnología",
+            Fecha = DateTime.Today, TarjetaCreditoId = tarjetaId
+        }, t.UsuarioId);
 
         var vm = new ViewModels.TarjetasViewModel(t.Db, t.UsuarioId);
-        vm.Seleccionada = vm.Tarjetas.First();
+        vm.Seleccionada = vm.Tarjetas.First(x => x.Id == tarjetaId);
         vm.CuentaAbono  = null;              // no hay cuentas creadas
         vm.AbonoMonto   = "10000";
 
         vm.AbonarCommand.Execute(null);
 
-        var movimiento = t.Db.ObtenerTransacciones(t.UsuarioId).Single();
+        var movimiento = t.Db.ObtenerTransacciones(t.UsuarioId)
+                          .Single(x => x.PagoDeTarjetaId is not null);
         Assert.Equal("Efectivo", movimiento.CuentaNombre);
         Assert.Null(movimiento.CuentaId);
         Assert.Empty(t.Db.VerificarIntegridad());

@@ -39,8 +39,8 @@ public sealed class BaseDePrueba : IDisposable
     }
 
     /// <summary>
-    /// Sólo los problemas críticos. Útil cuando el escenario arrastra un defecto ya
-    /// documentado en <c>BugsConocidosTests</c> que todavía no toca corregir.
+    /// Sólo los problemas críticos. Útil cuando el escenario arrastra una advertencia conocida
+    /// que no es lo que la prueba está comprobando.
     /// </summary>
     public List<Models.ProblemaIntegridad> Criticos() =>
         Db.VerificarIntegridad()
