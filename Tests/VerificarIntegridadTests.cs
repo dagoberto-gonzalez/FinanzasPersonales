@@ -27,28 +27,34 @@ public class VerificarIntegridadTests
     // motivo que la de cuentas en D1: el saldo se calcula, así que no puede desviarse. Lo que sí
     // se comprueba ahora es una deuda negativa — ver Bloque2D3Tests.AvisaSiSePagoMasDeLoComprado.
 
+    // Las referencias rotas dejaron de comprobarse a mano: desde el Bloque 3 las declara el
+    // esquema y las vigila el motor, y el verificador consulta PRAGMA foreign_key_check.
+    // Estas pruebas comprueban lo que ahora importa: que ni siquiera se puedan crear.
+
     [Fact]
-    public void DetectaTransaccionConCuentaInexistente()
+    public void NoSePuedeCrearUnaTransaccionConCuentaInexistente()
     {
         using var t = new BaseDePrueba();
-        t.Sql($"""
+
+        Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(() => t.Sql($"""
             INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,CuentaId)
             VALUES ({t.UsuarioId},'Gasto',100,'Otros','fantasma','2026-09-01',9999)
-            """);
+            """));
 
-        Assert.NotNull(Buscar(t.Db.VerificarIntegridad(), "Cuentas", "ya no existe"));
+        Assert.Empty(t.Db.VerificarIntegridad());
     }
 
     [Fact]
-    public void DetectaTransaccionConTarjetaInexistente()
+    public void NoSePuedeCrearUnaTransaccionConTarjetaInexistente()
     {
         using var t = new BaseDePrueba();
-        t.Sql($"""
+
+        Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(() => t.Sql($"""
             INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,TarjetaCreditoId)
             VALUES ({t.UsuarioId},'Gasto',100,'Otros','fantasma','2026-09-01',9999)
-            """);
+            """));
 
-        Assert.NotNull(Buscar(t.Db.VerificarIntegridad(), "Tarjetas", "ya no existe"));
+        Assert.Empty(t.Db.VerificarIntegridad());
     }
 
     [Fact]
@@ -123,12 +129,14 @@ public class VerificarIntegridadTests
     }
 
     [Fact]
-    public void DetectaFilasDeUsuarioEliminado()
+    public void NoSePuedenCrearFilasDeUnUsuarioInexistente()
     {
         using var t = new BaseDePrueba();
-        t.Sql("INSERT INTO Cuentas (UsuarioId,Nombre,Tipo,Banco,Activa) VALUES (4242,'Huerfana','Débito','',1)");
 
-        Assert.NotNull(Buscar(t.Db.VerificarIntegridad(), "Usuarios", "Cuentas"));
+        Assert.ThrowsAny<Microsoft.Data.Sqlite.SqliteException>(() => t.Sql(
+            "INSERT INTO Cuentas (UsuarioId,Nombre,Tipo,Banco,Activa) VALUES (4242,'Huerfana','Débito','',1)"));
+
+        Assert.Empty(t.Db.VerificarIntegridad());
     }
 
     [Fact]
@@ -165,17 +173,18 @@ public class VerificarIntegridadTests
         t.Db.InsertarCuenta(new Cuenta { Nombre = "Principal", SaldoInicial = 777 }, t.UsuarioId);
         var cuentaId = t.Db.ObtenerCuentas(t.UsuarioId).Single().Id;
 
-        // Un dato roto a propósito: transacción que apunta a una cuenta inexistente.
+        // Un dato roto a propósito que las claves foráneas no cubren: un fijo con los dos días
+        // iguales, que el verificador marca como crítico.
         t.Sql($"""
-            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,CuentaId)
-            VALUES ({t.UsuarioId},'Gasto',100,'Otros','fantasma','2026-09-01',9999)
+            INSERT INTO GastosFijos (UsuarioId,Nombre,Monto,DiaVencimiento,DiaVencimiento2,Activo)
+            VALUES ({t.UsuarioId},'Luz',20000,15,15,1)
             """);
 
         t.Db.VerificarIntegridad();
         t.Db.VerificarIntegridad();
 
-        // El diagnóstico reporta, nunca repara: ni borra la fila rota ni toca el saldo.
-        Assert.Equal(1, t.Escalar<long>("SELECT COUNT(*) FROM Transacciones WHERE CuentaId=9999"));
+        // El diagnóstico reporta, nunca repara: ni corrige la fila ni toca el saldo.
+        Assert.Equal(1, t.Escalar<long>("SELECT COUNT(*) FROM GastosFijos WHERE DiaVencimiento2=DiaVencimiento"));
         Assert.Equal(777.0, t.Escalar<double>($"SELECT SaldoInicial FROM Cuentas WHERE Id={cuentaId}"));
     }
 }

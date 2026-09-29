@@ -42,10 +42,11 @@ public class DiagnosticoAdminTests
     {
         using var t = new BaseDePrueba();
 
-        // Una referencia rota: transacción que apunta a una cuenta que ya no existe.
+        // Un defecto que las claves foráneas no pueden cubrir: un fijo con los dos días iguales
+        // comparte un único PagoMensual, así que el importe se cuenta dos veces.
         t.Sql($"""
-            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,CuentaId)
-            VALUES ({t.UsuarioId},'Gasto',100,'Otros','fantasma','2026-09-01',9999)
+            INSERT INTO GastosFijos (UsuarioId,Nombre,Monto,DiaVencimiento,DiaVencimiento2,Activo)
+            VALUES ({t.UsuarioId},'Luz',20000,15,15,1)
             """);
 
         var vm = new AdminViewModel(t.Db);

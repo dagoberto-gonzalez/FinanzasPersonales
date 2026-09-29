@@ -155,6 +155,36 @@ Marking a `GastoFijo`/`IngresoFijo` paid in `PagosMensuales` still creates a lin
 `Transaccion` (`TransaccionId`); unmarking deletes it, and every balance follows on its own.
 `EliminarTransaccion` is now a plain `DELETE` — there is nothing left to revert.
 
+### Foreign keys
+
+The schema declares its foreign keys and `Abrir()` turns enforcement on for every connection —
+SQLite defaults it off, and the setting is per connection, not per database. Deleting a row that
+others point at now fails at the engine, not only where someone remembered to check.
+
+- **`UsuarioId` is `ON DELETE CASCADE`** in all thirteen per-user tables. Deleting a user takes
+  their data with it, so adding a new table cannot be forgotten. `Categorias.UsuarioId` stays
+  nullable — NULL means global and survives.
+- **`Transacciones.CuentaId` / `TarjetaCreditoId` / `PagoDeTarjetaId` are `RESTRICT`.** An
+  account or card with movements cannot be deleted; to stop seeing it, deactivate it
+  (`Cuenta.Activa`). The ViewModels check first and offer that instead of letting the delete fail.
+- **Optional links to a transaction are `SET NULL`** (`PagosMensuales`, `PeriodosLaborales`,
+  `IngresoLaboralDirecto`). `EliminarTransaccion` additionally unmarks the linked
+  `PagosMensuales` row: the constraint alone would leave `Pagado=1` pointing at nothing, which
+  is the state that used to crash the app.
+- **`PagosMensuales.FijoId` has no foreign key** — it points at `GastosFijos` or `IngresosFijos`
+  depending on `TipoFijo`, and a key cannot have two destinations. The verifier covers it by hand.
+
+Adding or changing a foreign key means recreating the table (SQLite has no `ALTER TABLE ADD
+CONSTRAINT`): see `MigrarAClavesForaneas`, which follows SQLite's documented procedure —
+`foreign_keys=OFF` plus `legacy_alter_table=ON` so the rename does not rewrite other tables'
+references, all inside one transaction. It runs once, guarded by `TieneClavesForaneas`, and
+**must stay before `CrearIndices`**: recreating a table drops its indexes.
+
+Category names are still stored as text on `Transacciones.Categoria`, deliberately —
+normalising to a `CategoriaId` would buy little here, since categories are picked from a
+dropdown rather than typed. `ActualizarCategoria` cascades a rename to the history instead, and
+a category in use cannot be deleted.
+
 ## Invariants worth knowing
 
 These are enforced in `AppDatabase` (not just in the UI), so breaking them fails loudly:
@@ -179,19 +209,22 @@ These are enforced in `AppDatabase` (not just in the UI), so breaking them fails
 
 ## Integrity verification
 
-Money lives in several manually-synchronised places: `Transacciones` (the event log),
-`Cuentas.SaldoActual` and `TarjetasCredito.SaldoUsado` (running counters updated by hand in
-~9 places each), plus `MetasAhorro.MontoActual` and `PeriodosLaborales`. Nothing reconciles them.
+`Transacciones` is the ledger, and since D1/D3 account and card balances are derived from it, so
+they cannot drift. What is still kept by hand: `MetasAhorro.MontoActual` (D5 pending — a purely
+decorative counter today), `PeriodosLaborales`, and the `ResumenMensual` snapshots, which nothing
+recomputes when the month behind them changes. There are also no foreign keys, so deleting a row
+can leave others pointing at it.
 
-(Since D1, account balances are no longer among them — they are derived. The account-drift check
-was removed from the verifier because it could never fire again.)
+`AppDatabase.VerificarIntegridad()` is the missing reconciliation. It is **read-only — it
+reports, it never repairs** — and returns `List<ProblemaIntegridad>` covering: `PRAGMA
+foreign_key_check` for every declared relation at once, the polymorphic `PagosMensuales.FijoId`
+that no key can express, impossible states (payment marked paid with no transaction, income
+booked against a credit card, a card paid for more than was bought on it, fixed items whose two
+due days are equal), categories no longer in the table, and stale `ResumenMensual` snapshots.
 
-`AppDatabase.VerificarIntegridad()` is that missing reconciliation. It is **read-only — it
-reports, it never repairs** — and returns `List<ProblemaIntegridad>` covering: stored-vs-computed
-balances for accounts and cards, broken references (transactions → deleted account/card, payments
-→ deleted transaction), impossible states (payment marked paid with no transaction, income booked
-against a credit card, fixed items whose two due days are equal), orphan rows from incompletely
-deleted users, and stale `ResumenMensual` snapshots.
+The stored-vs-computed balance checks it began with are gone: once D1 and D3 made those figures
+derived, neither could ever fire again. That is the pattern to expect here — when a class of bug
+becomes structurally impossible, its check should be deleted, not kept as reassurance.
 
 Surfaced in the UI under **Admin → Diagnóstico de integridad**. A healthy database returns an
 empty list; that empty list is the exit criterion for any refactor of the money paths.

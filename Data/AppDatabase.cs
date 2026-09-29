@@ -43,7 +43,22 @@ public class AppDatabase
 
     // ── Utilidades ────────────────────────────────────────────────────────────
 
-    private SqliteConnection Abrir() { var c = new SqliteConnection(_cs); c.Open(); return c; }
+    /// <summary>
+    /// Abre una conexión con las claves foráneas activadas. SQLite las trae desactivadas por
+    /// compatibilidad y el ajuste es por conexión, no por base: sin esta línea las claves
+    /// declaradas en el esquema no se comprobarían nunca.
+    /// </summary>
+    private SqliteConnection Abrir()
+    {
+        var c = new SqliteConnection(_cs);
+        c.Open();
+        using (var pragma = c.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA foreign_keys=ON";
+            pragma.ExecuteNonQuery();
+        }
+        return c;
+    }
 
     public static string Hash(string text)
     {
@@ -180,6 +195,9 @@ public class AppDatabase
         MigrarCategorias(conn);
         // Migración mono→multi usuario
         MigrarAMultiUsuario(conn);
+        // Claves foráneas: recrea las tablas, así que va después de todas las migraciones
+        // de columnas y antes de los índices (que se pierden al recrear).
+        MigrarAClavesForaneas(conn);
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -532,6 +550,342 @@ public class AppDatabase
                 ("$n", c));
     }
 
+
+    // ── Claves foráneas (Bloque 3) ────────────────────────────────────────────
+
+    /// <summary>
+    /// Declara las claves foráneas del esquema. SQLite no permite añadirlas con ALTER TABLE, así
+    /// que hay que recrear cada tabla copiando los datos.
+    /// <para>
+    /// Qué gana: que el motor impida las filas huérfanas en vez de depender de que cada borrado
+    /// esté bien escrito. En particular <c>ON DELETE CASCADE</c> sobre <c>UsuarioId</c> hace que
+    /// eliminar un usuario limpie todo solo — antes era una lista de tablas a mano, y se habían
+    /// olvidado seis.
+    /// </para>
+    /// <para>
+    /// Las acciones expresan las reglas que ya aplica la aplicación:
+    /// <list type="bullet">
+    /// <item><c>CASCADE</c> en UsuarioId — los datos de un usuario mueren con él.</item>
+    /// <item><c>RESTRICT</c> en cuenta y tarjeta de una transacción — no se borra algo que tiene
+    /// movimientos; para dejar de verlo se desactiva.</item>
+    /// <item><c>SET NULL</c> en las referencias opcionales a una transacción o cuenta — la fila
+    /// sobrevive sin el vínculo.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// No se puede declarar <c>PagosMensuales.FijoId</c>: apunta a GastosFijos o a IngresosFijos
+    /// según <c>TipoFijo</c>, y una clave foránea no admite dos destinos. Eso lo cubren
+    /// <c>EliminarGastoFijo</c>/<c>EliminarIngresoFijo</c> y el verificador.
+    /// </para>
+    /// </summary>
+    private static void MigrarAClavesForaneas(SqliteConnection conn)
+    {
+        if (TieneClavesForaneas(conn, "Transacciones")) return;
+
+        LimpiarHuerfanosPrevios(conn);
+
+        // Procedimiento recomendado por SQLite para cambiar el esquema de una tabla.
+        // legacy_alter_table evita que el RENAME reescriba las referencias de otras tablas.
+        EjecutarNonQuery(conn, "PRAGMA foreign_keys=OFF");
+        EjecutarNonQuery(conn, "PRAGMA legacy_alter_table=ON");
+
+        using var tr = conn.BeginTransaction();
+        try
+        {
+            Recrear(conn, "Cuentas",
+                """
+                CREATE TABLE Cuentas__fk (
+                    Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId    INTEGER NOT NULL,
+                    Nombre       TEXT    NOT NULL,
+                    Tipo         TEXT    NOT NULL DEFAULT 'Débito',
+                    Banco        TEXT    NOT NULL DEFAULT '',
+                    Activa       INTEGER NOT NULL DEFAULT 1,
+                    SaldoInicial REAL    NOT NULL DEFAULT 0,
+                    UNIQUE(UsuarioId, Nombre),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial");
+
+            Recrear(conn, "TarjetasCredito",
+                """
+                CREATE TABLE TarjetasCredito__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL DEFAULT 1,
+                    Nombre        TEXT    NOT NULL,
+                    LimiteCredito REAL    NOT NULL DEFAULT 0,
+                    DiaCierre     INTEGER NOT NULL DEFAULT 15,
+                    DiaPago       INTEGER NOT NULL DEFAULT 5,
+                    UNIQUE(UsuarioId, Nombre),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, LimiteCredito, DiaCierre, DiaPago");
+
+            Recrear(conn, "Categorias",
+                """
+                CREATE TABLE Categorias__fk (
+                    Id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId INTEGER,
+                    Nombre    TEXT NOT NULL,
+                    UNIQUE(UsuarioId, Nombre),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre");
+
+            Recrear(conn, "Transacciones",
+                """
+                CREATE TABLE Transacciones__fk (
+                    Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId        INTEGER NOT NULL DEFAULT 1,
+                    Tipo             TEXT    NOT NULL,
+                    Monto            REAL    NOT NULL,
+                    Categoria        TEXT    NOT NULL,
+                    Descripcion      TEXT    NOT NULL DEFAULT '',
+                    Fecha            TEXT    NOT NULL,
+                    Notas            TEXT    NOT NULL DEFAULT '',
+                    CuentaNombre     TEXT    NOT NULL DEFAULT 'Efectivo',
+                    TarjetaCreditoId INTEGER,
+                    CuentaId         INTEGER,
+                    PagoDeTarjetaId  INTEGER,
+                    FOREIGN KEY (UsuarioId)        REFERENCES Usuarios(Id)        ON DELETE CASCADE,
+                    FOREIGN KEY (CuentaId)         REFERENCES Cuentas(Id)         ON DELETE RESTRICT,
+                    FOREIGN KEY (TarjetaCreditoId) REFERENCES TarjetasCredito(Id) ON DELETE RESTRICT,
+                    FOREIGN KEY (PagoDeTarjetaId)  REFERENCES TarjetasCredito(Id) ON DELETE RESTRICT
+                )
+                """,
+                "Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, TarjetaCreditoId, CuentaId, PagoDeTarjetaId");
+
+            Recrear(conn, "MetasAhorro",
+                """
+                CREATE TABLE MetasAhorro__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL DEFAULT 1,
+                    Nombre        TEXT    NOT NULL,
+                    MontoObjetivo REAL    NOT NULL,
+                    MontoActual   REAL    NOT NULL DEFAULT 0,
+                    FechaLimite   TEXT    NOT NULL,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite");
+
+            Recrear(conn, "GastosFijos",
+                """
+                CREATE TABLE GastosFijos__fk (
+                    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId       INTEGER NOT NULL DEFAULT 1,
+                    Nombre          TEXT    NOT NULL,
+                    Monto           REAL    NOT NULL,
+                    DiaVencimiento  INTEGER NOT NULL,
+                    DiaVencimiento2 INTEGER NOT NULL DEFAULT 0,
+                    Activo          INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, Monto, DiaVencimiento, DiaVencimiento2, Activo");
+
+            Recrear(conn, "IngresosFijos",
+                """
+                CREATE TABLE IngresosFijos__fk (
+                    Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId   INTEGER NOT NULL DEFAULT 1,
+                    Nombre      TEXT    NOT NULL,
+                    Monto       REAL    NOT NULL,
+                    DiaIngreso  INTEGER NOT NULL,
+                    DiaIngreso2 INTEGER NOT NULL DEFAULT 0,
+                    Activo      INTEGER NOT NULL DEFAULT 1,
+                    CuentaId    INTEGER,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE,
+                    FOREIGN KEY (CuentaId)  REFERENCES Cuentas(Id)  ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, Nombre, Monto, DiaIngreso, DiaIngreso2, Activo, CuentaId");
+
+            Recrear(conn, "PagosMensuales",
+                """
+                CREATE TABLE PagosMensuales__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL DEFAULT 1,
+                    TipoFijo      TEXT    NOT NULL,
+                    FijoId        INTEGER NOT NULL,
+                    Anio          INTEGER NOT NULL,
+                    Mes           INTEGER NOT NULL,
+                    Dia           INTEGER NOT NULL DEFAULT 1,
+                    Pagado        INTEGER NOT NULL DEFAULT 0,
+                    MetodoPago    TEXT    NOT NULL DEFAULT '',
+                    TransaccionId INTEGER,
+                    UNIQUE(UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia),
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado, MetodoPago, TransaccionId");
+
+            Recrear(conn, "ConfiguracionLaboral",
+                """
+                CREATE TABLE ConfiguracionLaboral__fk (
+                    UsuarioId      INTEGER PRIMARY KEY,
+                    SalarioPorHora REAL    NOT NULL DEFAULT 0,
+                    JornadaSemanal REAL    NOT NULL DEFAULT 48,
+                    DiaPago        INTEGER NOT NULL DEFAULT 15,
+                    ModoPago       TEXT    NOT NULL DEFAULT 'Mensual',
+                    DiaPago2       INTEGER NOT NULL DEFAULT 0,
+                    DiaSemana      INTEGER NOT NULL DEFAULT 5,
+                    Viaticos       REAL    NOT NULL DEFAULT 0,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos");
+
+            Recrear(conn, "RegistrosDiasLaborales",
+                """
+                CREATE TABLE RegistrosDiasLaborales__fk (
+                    Id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId           INTEGER NOT NULL,
+                    Fecha               TEXT    NOT NULL,
+                    HorasNormales       REAL    NOT NULL DEFAULT 0,
+                    HorasExtraDiurnas   REAL    NOT NULL DEFAULT 0,
+                    HorasExtraNocturnas REAL    NOT NULL DEFAULT 0,
+                    HorasDobles         REAL    NOT NULL DEFAULT 0,
+                    EsFeriado           INTEGER NOT NULL DEFAULT 0,
+                    EsAusencia          INTEGER NOT NULL DEFAULT 0,
+                    TieneGoceSalario    INTEGER NOT NULL DEFAULT 0,
+                    Viaticos            REAL    NOT NULL DEFAULT 0,
+                    UNIQUE(UsuarioId, Fecha),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas, HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos");
+
+            Recrear(conn, "PeriodosLaborales",
+                """
+                CREATE TABLE PeriodosLaborales__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL,
+                    Anio          INTEGER NOT NULL,
+                    Mes           INTEGER NOT NULL,
+                    SalarioBruto  REAL    NOT NULL DEFAULT 0,
+                    Deducciones   REAL    NOT NULL DEFAULT 0,
+                    SalarioNeto   REAL    NOT NULL DEFAULT 0,
+                    Cerrado       INTEGER NOT NULL DEFAULT 0,
+                    TransaccionId INTEGER,
+                    Notas         TEXT    NOT NULL DEFAULT '',
+                    UNIQUE(UsuarioId, Anio, Mes),
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId, Notas");
+
+            Recrear(conn, "IngresoLaboralDirecto",
+                """
+                CREATE TABLE IngresoLaboralDirecto__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL,
+                    Fecha         TEXT    NOT NULL,
+                    Monto         REAL    NOT NULL DEFAULT 0,
+                    Descripcion   TEXT    NOT NULL DEFAULT '',
+                    CuentaId      INTEGER,
+                    TransaccionId INTEGER,
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (CuentaId)      REFERENCES Cuentas(Id)       ON DELETE SET NULL,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, Fecha, Monto, Descripcion, CuentaId, TransaccionId");
+
+            Recrear(conn, "ResumenMensual",
+                """
+                CREATE TABLE ResumenMensual__fk (
+                    Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId        INTEGER NOT NULL,
+                    Anio             INTEGER NOT NULL,
+                    Mes              INTEGER NOT NULL,
+                    Ingresos         REAL    NOT NULL DEFAULT 0,
+                    Gastos           REAL    NOT NULL DEFAULT 0,
+                    Balance          REAL    NOT NULL DEFAULT 0,
+                    BalanceAcumulado REAL    NOT NULL DEFAULT 0,
+                    NumTransacciones INTEGER NOT NULL DEFAULT 0,
+                    PeriodoLaboral   INTEGER NOT NULL DEFAULT 0,
+                    FechaCierre      TEXT    NOT NULL DEFAULT '',
+                    Notas            TEXT    NOT NULL DEFAULT '',
+                    UNIQUE(UsuarioId, Anio, Mes),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Anio, Mes, Ingresos, Gastos, Balance, BalanceAcumulado, NumTransacciones, PeriodoLaboral, FechaCierre, Notas");
+
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
+        finally
+        {
+            EjecutarNonQuery(conn, "PRAGMA legacy_alter_table=OFF");
+            EjecutarNonQuery(conn, "PRAGMA foreign_keys=ON");
+        }
+    }
+
+    private static bool TieneClavesForaneas(SqliteConnection conn, string tabla)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_foreign_key_list('{tabla}')";
+        return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L) > 0;
+    }
+
+    /// <summary>
+    /// Copia una tabla a una nueva con claves foráneas y la deja con el nombre original.
+    /// Las columnas se nombran explícitamente: un <c>SELECT *</c> se rompería en cuanto el
+    /// orden difiriera entre la tabla vieja y la nueva.
+    /// </summary>
+    private static void Recrear(SqliteConnection conn, string tabla, string ddl, string columnas)
+    {
+        EjecutarNonQuery(conn, ddl);
+        EjecutarNonQuery(conn, $"INSERT INTO {tabla}__fk ({columnas}) SELECT {columnas} FROM {tabla}");
+        EjecutarNonQuery(conn, $"DROP TABLE {tabla}");
+        EjecutarNonQuery(conn, $"ALTER TABLE {tabla}__fk RENAME TO {tabla}");
+    }
+
+    /// <summary>
+    /// Las filas que ya estuvieran rotas violarían las claves nuevas nada más declararlas, así
+    /// que se sanean antes: se desvinculan las referencias muertas y se borran los datos de
+    /// usuarios que ya no existen.
+    /// </summary>
+    private static void LimpiarHuerfanosPrevios(SqliteConnection conn)
+    {
+        EjecutarNonQuery(conn, """
+            UPDATE Transacciones SET CuentaId = NULL
+             WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas);
+            UPDATE Transacciones SET TarjetaCreditoId = NULL
+             WHERE TarjetaCreditoId IS NOT NULL AND TarjetaCreditoId NOT IN (SELECT Id FROM TarjetasCredito);
+            UPDATE Transacciones SET PagoDeTarjetaId = NULL
+             WHERE PagoDeTarjetaId IS NOT NULL AND PagoDeTarjetaId NOT IN (SELECT Id FROM TarjetasCredito);
+            UPDATE IngresosFijos SET CuentaId = NULL
+             WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas);
+            UPDATE IngresoLaboralDirecto SET CuentaId = NULL
+             WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas);
+            """);
+
+        // Un pago que dice estar pagado pero cuya transacción ya no existe, no estaba pagado.
+        EjecutarNonQuery(conn, """
+            UPDATE PagosMensuales SET TransaccionId = NULL, Pagado = 0, MetodoPago = ''
+             WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones);
+            UPDATE PeriodosLaborales SET TransaccionId = NULL
+             WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones);
+            UPDATE IngresoLaboralDirecto SET TransaccionId = NULL
+             WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones);
+            """);
+
+        // Filas de usuarios eliminados: con CASCADE no volverán a aparecer.
+        foreach (var tabla in TablasPorUsuario)
+        {
+            var filtro = tabla == "Categorias" ? "UsuarioId IS NOT NULL AND " : "";
+            EjecutarNonQuery(conn,
+                $"DELETE FROM {tabla} WHERE {filtro}UsuarioId NOT IN (SELECT Id FROM Usuarios)");
+        }
+    }
     // ── Usuarios ──────────────────────────────────────────────────────────────
 
     public Usuario? ValidarCredenciales(string nombreUsuario, string password)
@@ -630,18 +984,31 @@ public class AppDatabase
             ("$a", activo ? 1 : 0), ("$id", usuarioId));
     }
 
+    /// <summary>
+    /// Tablas con datos propios de un usuario. Tenerlas en un solo sitio evita que al añadir
+    /// una tabla nueva se olvide de limpiarla: antes se borraban 7 de 13 y las otras 6 quedaban
+    /// como filas huérfanas, mientras el diálogo prometía eliminar "todos sus datos".
+    /// </summary>
+    private static readonly string[] TablasPorUsuario =
+    [
+        "Transacciones", "MetasAhorro", "TarjetasCredito", "GastosFijos", "IngresosFijos",
+        "PagosMensuales", "Categorias", "Cuentas", "ConfiguracionLaboral",
+        "RegistrosDiasLaborales", "PeriodosLaborales", "IngresoLaboralDirecto", "ResumenMensual"
+    ];
+
     public void EliminarUsuario(int usuarioId)
     {
         using var conn = Abrir();
-        // Eliminar todos los datos del usuario
-        EjecutarNonQuery(conn, "DELETE FROM Transacciones   WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM MetasAhorro     WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM TarjetasCredito WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM GastosFijos     WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM IngresosFijos   WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM PagosMensuales  WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM Categorias      WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM Usuarios        WHERE Id=$id",        ("$id", usuarioId));
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            foreach (var tabla in TablasPorUsuario)
+                EjecutarNonQuery(conn, $"DELETE FROM {tabla} WHERE UsuarioId=$id", ("$id", usuarioId));
+
+            EjecutarNonQuery(conn, "DELETE FROM Usuarios WHERE Id=$id", ("$id", usuarioId));
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
     }
 
     public void CambiarPassword(int usuarioId, string nuevaPassword)
@@ -743,6 +1110,19 @@ public class AppDatabase
             ("$uid", uid), ("$n", nombre.Trim()));
     }
 
+    /// <summary>Transacciones del usuario que usan esa categoría.</summary>
+    public int ContarTransaccionesEnCategoria(string nombre, int usuarioId)
+    {
+        using var conn = Abrir();
+        return (int)EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE Categoria=$n AND UsuarioId=$uid",
+            ("$n", nombre), ("$uid", usuarioId));
+    }
+
+    /// <summary>
+    /// Se niega a borrar una categoría en uso: las transacciones guardan el nombre, así que
+    /// quedarían con una etiqueta que ya no aparece en ningún filtro.
+    /// </summary>
     public void EliminarCategoria(int categoriaId, int usuarioId, bool esAdmin)
     {
         using var conn = Abrir();
@@ -752,6 +1132,13 @@ public class AppDatabase
         var nombre = EjecutarScalar<string>(conn,
             "SELECT COALESCE((SELECT Nombre FROM Categorias WHERE Id=$id),'')", ("$id", categoriaId));
         if (EsCategoriaSistema(nombre)) return;
+
+        var enUso = EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE Categoria=$n", ("$n", nombre));
+        if (enUso > 0)
+            throw new InvalidOperationException(
+                $"«{nombre}» se usa en {enUso} transacción{(enUso == 1 ? "" : "es")}. " +
+                "Reasígnalas a otra categoría antes de eliminarla.");
 
         // Admin puede borrar cualquiera; usuario normal solo las propias
         if (esAdmin)
@@ -770,14 +1157,31 @@ public class AppDatabase
             "SELECT COALESCE((SELECT Nombre FROM Categorias WHERE Id=$id),'')", ("$id", categoriaId));
         if (EsCategoriaSistema(nombreActual)) return;
 
-        if (esAdmin)
-            EjecutarNonQuery(conn,
-                "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id",
-                ("$nuevo", nombreNuevo.Trim()), ("$id", categoriaId));
-        else
-            EjecutarNonQuery(conn,
-                "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id AND UsuarioId=$uid",
-                ("$nuevo", nombreNuevo.Trim()), ("$id", categoriaId), ("$uid", usuarioId));
+        var nuevo = nombreNuevo.Trim();
+        if (nuevo.Length == 0 || nuevo == nombreActual) return;
+
+        using var tr = conn.BeginTransaction();
+        try
+        {
+            var filas = esAdmin
+                ? EjecutarScalar<long>(conn,
+                    "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id; SELECT changes()",
+                    ("$nuevo", nuevo), ("$id", categoriaId))
+                : EjecutarScalar<long>(conn,
+                    "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id AND UsuarioId=$uid; SELECT changes()",
+                    ("$nuevo", nuevo), ("$id", categoriaId), ("$uid", usuarioId));
+
+            // El renombrado se propaga al historial. Las transacciones guardan el NOMBRE, así
+            // que sin esto todo lo registrado antes conservaba el nombre viejo y dejaba de
+            // aparecer en el filtro: la categoría se renombraba y el pasado se quedaba huérfano.
+            if (filas > 0)
+                EjecutarNonQuery(conn,
+                    "UPDATE Transacciones SET Categoria=$nuevo WHERE Categoria=$viejo",
+                    ("$nuevo", nuevo), ("$viejo", nombreActual));
+
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
     }
 
     // ── Transacciones ─────────────────────────────────────────────────────────
@@ -863,7 +1267,20 @@ public class AppDatabase
     public void EliminarTransaccion(int id)
     {
         using var conn = Abrir();
-        EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", id));
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            // Si esta transacción la generó un gasto o ingreso fijo al marcarse pagado, borrarla
+            // significa que ya no está pagado. La clave foránea sola dejaría Pagado=1 apuntando
+            // a nada, que es justo el estado que antes hacía reventar la aplicación.
+            EjecutarNonQuery(conn,
+                "UPDATE PagosMensuales SET Pagado=0, MetodoPago='', TransaccionId=NULL WHERE TransaccionId=$id",
+                ("$id", id));
+
+            EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", id));
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
     }
 
     private static Transaccion MapTransaccion(SqliteDataReader r) => new()
@@ -1007,9 +1424,32 @@ public class AppDatabase
             ("$cierre", t.DiaCierre), ("$pago", t.DiaPago), ("$id", t.Id));
     }
 
+    /// <summary>Compras y pagos asociados a una tarjeta.</summary>
+    public int ContarMovimientosDeTarjeta(int tarjetaId)
+    {
+        using var conn = Abrir();
+        return (int)EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE TarjetaCreditoId=$id OR PagoDeTarjetaId=$id",
+            ("$id", tarjetaId));
+    }
+
+    /// <summary>
+    /// Se niega a borrar una tarjeta con movimientos. Antes los dejaba huérfanos, y esas
+    /// transacciones quedaban además inalcanzables desde la interfaz: sólo se llega a ellas
+    /// a través de la tarjeta.
+    /// </summary>
     public void EliminarTarjeta(int id)
     {
         using var conn = Abrir();
+
+        var movimientos = EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE TarjetaCreditoId=$id OR PagoDeTarjetaId=$id",
+            ("$id", id));
+        if (movimientos > 0)
+            throw new InvalidOperationException(
+                $"La tarjeta tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} registrado" +
+                $"{(movimientos == 1 ? "" : "s")}. Eliminarla dejaría esas transacciones sin forma de consultarse.");
+
         EjecutarNonQuery(conn, "DELETE FROM TarjetasCredito WHERE Id=$id", ("$id", id));
     }
 
@@ -1068,9 +1508,33 @@ public class AppDatabase
             ("$a", c.Activa ? 1 : 0), ("$si", (double)c.SaldoInicial), ("$id", c.Id));
     }
 
+    /// <summary>Movimientos registrados contra una cuenta. 0 si se puede eliminar sin perder nada.</summary>
+    public int ContarMovimientosDeCuenta(int cuentaId)
+    {
+        using var conn = Abrir();
+        return (int)EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE CuentaId=$id", ("$id", cuentaId));
+    }
+
+    /// <summary>
+    /// Se niega a borrar una cuenta con movimientos. Borrarla no borraría el dinero que pasó por
+    /// ella: las transacciones son hechos, la cuenta es la etiqueta de por dónde pasaron. Quedarían
+    /// apuntando al vacío y sin sumar a ningún saldo.
+    /// <para>Para dejar de verla, se desactiva (<c>Activa = false</c>), que conserva el histórico.</para>
+    /// </summary>
     public void EliminarCuenta(int id)
     {
         using var conn = Abrir();
+
+        var movimientos = EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE CuentaId=$id", ("$id", id));
+        if (movimientos > 0)
+            throw new InvalidOperationException(
+                $"La cuenta tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} registrado" +
+                $"{(movimientos == 1 ? "" : "s")}. Desactívala para dejar de usarla sin perder el historial.");
+
+        // Los ingresos fijos que apuntaran aquí quedarían colgando; se desvinculan.
+        EjecutarNonQuery(conn, "UPDATE IngresosFijos SET CuentaId=NULL WHERE CuentaId=$id", ("$id", id));
         EjecutarNonQuery(conn, "DELETE FROM Cuentas WHERE Id=$id", ("$id", id));
     }
 
@@ -2233,23 +2697,30 @@ public class AppDatabase
         }
 
         // ── 3. Referencias rotas ──
-        Contar("SELECT COUNT(*) FROM Transacciones " +
-               "WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas)",
-            SeveridadProblema.Critico, "Cuentas",
-            "Transacciones que apuntan a una cuenta que ya no existe.",
-            "Sus importes ya no ajustan ningún saldo: la reversión al borrarlas no hace nada.");
+        // Las que el esquema declara las comprueba el propio motor, de una vez y para todas:
+        // una comprobación escrita a mano por relación se quedaría corta en cuanto se añadiera
+        // una clave nueva. Sólo puede encontrar algo si una migración dejó restos (se ejecutan
+        // con las claves desactivadas) o si alguien editó el archivo por fuera.
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA foreign_key_check";
+            var rotas = new Dictionary<string, int>();
+            using (var r = cmd.ExecuteReader())
+                while (r.Read())
+                {
+                    var clave = $"{r.GetString(0)} → {r.GetString(2)}";
+                    rotas[clave] = rotas.GetValueOrDefault(clave) + 1;
+                }
 
-        Contar("SELECT COUNT(*) FROM Transacciones " +
-               "WHERE TarjetaCreditoId IS NOT NULL AND TarjetaCreditoId NOT IN (SELECT Id FROM TarjetasCredito)",
-            SeveridadProblema.Critico, "Tarjetas",
-            "Transacciones que apuntan a una tarjeta que ya no existe.",
-            "Quedan excluidas de todos los totales y son inalcanzables desde la interfaz.");
+            foreach (var (relacion, cuantas) in rotas)
+                Add(SeveridadProblema.Critico, "Referencias",
+                    $"Filas de «{relacion.Split('→')[0].Trim()}» apuntan a algo que ya no existe.",
+                    $"Relación {relacion}. Las claves foráneas deberían impedirlo: revisar la última migración.",
+                    cuantas);
+        }
 
-        Contar("SELECT COUNT(*) FROM PagosMensuales " +
-               "WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones)",
-            SeveridadProblema.Advertencia, "Pagos fijos",
-            "Pagos marcados que apuntan a una transacción borrada.");
-
+        // PagosMensuales.FijoId apunta a GastosFijos o a IngresosFijos según TipoFijo. Una clave
+        // foránea no admite dos destinos, así que esta relación sí hay que comprobarla a mano.
         Contar("SELECT COUNT(*) FROM PagosMensuales " +
                "WHERE TipoFijo='Gasto' AND FijoId NOT IN (SELECT Id FROM GastosFijos)",
             SeveridadProblema.Advertencia, "Pagos fijos",
@@ -2259,16 +2730,6 @@ public class AppDatabase
                "WHERE TipoFijo='Ingreso' AND FijoId NOT IN (SELECT Id FROM IngresosFijos)",
             SeveridadProblema.Advertencia, "Pagos fijos",
             "Pagos mensuales de un ingreso fijo que ya no existe.");
-
-        Contar("SELECT COUNT(*) FROM IngresoLaboralDirecto " +
-               "WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones)",
-            SeveridadProblema.Advertencia, "Control Laboral",
-            "Ingresos laborales directos cuya transacción fue borrada.");
-
-        Contar("SELECT COUNT(*) FROM PeriodosLaborales " +
-               "WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones)",
-            SeveridadProblema.Advertencia, "Control Laboral",
-            "Períodos laborales cuya transacción de salario fue borrada.");
 
         // ── 4. Estados imposibles ──
         Contar("SELECT COUNT(*) FROM PagosMensuales WHERE Pagado=1 AND TransaccionId IS NULL",
@@ -2308,23 +2769,9 @@ public class AppDatabase
             SeveridadProblema.Advertencia, "Ingresos fijos",
             "Ingresos fijos ligados a una cuenta que ya no existe.");
 
-        // ── 5. Datos huérfanos de usuarios eliminados ──
-        // EliminarUsuario() sólo limpia 7 de las 13 tablas que tienen UsuarioId.
-        foreach (var tabla in new[]
-                 {
-                     "Transacciones", "MetasAhorro", "TarjetasCredito", "GastosFijos",
-                     "IngresosFijos", "PagosMensuales", "Categorias", "Cuentas",
-                     "ConfiguracionLaboral", "RegistrosDiasLaborales", "PeriodosLaborales",
-                     "IngresoLaboralDirecto", "ResumenMensual"
-                 })
-        {
-            // Categorias admite UsuarioId NULL (globales): esas no son huérfanas.
-            var filtroNull = tabla == "Categorias" ? "UsuarioId IS NOT NULL AND " : "";
-            Contar($"SELECT COUNT(*) FROM {tabla} " +
-                   $"WHERE {filtroNull}UsuarioId NOT IN (SELECT Id FROM Usuarios)",
-                SeveridadProblema.Advertencia, "Usuarios",
-                $"Filas en «{tabla}» de un usuario que ya no existe.");
-        }
+        // ── 5. Datos de usuarios eliminados ──
+        // Ya lo cubre la comprobación de claves foráneas de arriba: UsuarioId es CASCADE en las
+        // trece tablas, así que borrar un usuario se lleva sus filas y no quedan huérfanas.
 
         // ── 6. Cierres mensuales desactualizados ──
         // CerrarMes() guarda una foto. Nada impide editar el mes después del cierre.

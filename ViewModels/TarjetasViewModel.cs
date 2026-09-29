@@ -272,15 +272,38 @@ public class TarjetasViewModel : BaseViewModel
     private void EliminarTarjeta(TarjetaCredito? t)
     {
         if (t is null) return;
+        MensajeError = string.Empty;
+        MensajeOk    = string.Empty;
+
+        // Las transacciones de una tarjeta sólo se consultan a través de ella: al borrarla
+        // quedarían guardadas pero inalcanzables desde la interfaz.
+        var movimientos = _db.ContarMovimientosDeTarjeta(t.Id);
+        if (movimientos > 0)
+        {
+            MensajeError =
+                $"\"{t.Nombre}\" tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} " +
+                "registrado" + (movimientos == 1 ? "" : "s") + ". Eliminarla dejaría esas " +
+                "transacciones sin forma de consultarse.";
+            return;
+        }
+
         var res = System.Windows.MessageBox.Show(
             $"¿Eliminar la tarjeta \"{t.Nombre}\"? Esta acción no se puede deshacer.",
             "Confirmar eliminación",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning);
         if (res != System.Windows.MessageBoxResult.Yes) return;
-        _db.EliminarTarjeta(t.Id);
-        if (_seleccionada?.Id == t.Id) Seleccionada = null;
-        Cargar();
+
+        try
+        {
+            _db.EliminarTarjeta(t.Id);
+            if (_seleccionada?.Id == t.Id) Seleccionada = null;
+            Cargar();
+        }
+        catch (InvalidOperationException ex)
+        {
+            MensajeError = ex.Message;
+        }
     }
 
     private void Abonar()

@@ -257,6 +257,32 @@ public class CuentasViewModel : BaseViewModel
     private void Eliminar()
     {
         if (_seleccionada is null) return;
+        MensajeError = string.Empty;
+        MensajeOk    = string.Empty;
+
+        // Una cuenta con movimientos no se elimina: se desactiva. Se avisa antes de preguntar,
+        // en vez de dejar que la persona confirme algo que después se va a rechazar.
+        var movimientos = _db.ContarMovimientosDeCuenta(_seleccionada.Id);
+        if (movimientos > 0)
+        {
+            var desactivar = System.Windows.MessageBox.Show(
+                $"\"{_seleccionada.Nombre}\" tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} " +
+                "registrado" + (movimientos == 1 ? "" : "s") + ", así que no se puede eliminar sin " +
+                "dejar ese historial sin cuenta.\n\n" +
+                "¿Quieres desactivarla? Dejará de aparecer al registrar transacciones, pero el " +
+                "historial y los saldos se conservan.",
+                "La cuenta tiene movimientos",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning);
+
+            if (desactivar != System.Windows.MessageBoxResult.Yes) return;
+
+            _seleccionada.Activa = false;
+            _db.ActualizarCuenta(_seleccionada);
+            MensajeOk = "Cuenta desactivada. El historial se mantiene intacto.";
+            Cargar();
+            return;
+        }
 
         var res = System.Windows.MessageBox.Show(
             $"¿Eliminar la cuenta \"{_seleccionada.Nombre}\"?",
@@ -266,8 +292,15 @@ public class CuentasViewModel : BaseViewModel
 
         if (res != System.Windows.MessageBoxResult.Yes) return;
 
-        _db.EliminarCuenta(_seleccionada.Id);
-        Seleccionada = null;
-        Cargar();
+        try
+        {
+            _db.EliminarCuenta(_seleccionada.Id);
+            Seleccionada = null;
+            Cargar();
+        }
+        catch (InvalidOperationException ex)
+        {
+            MensajeError = ex.Message;
+        }
     }
 }
