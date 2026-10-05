@@ -259,13 +259,13 @@ public class Bloque1RegresionTests
             HorasDobles = 2
         });
 
-        Assert.Equal(2, t.Db.ObtenerRegistrosDia(t.UsuarioId, hoy.Year, hoy.Month).Count);
+        Assert.Equal(2, t.Db.ObtenerRegistrosDia(t.UsuarioId, new DateTime(hoy.Year, hoy.Month, 1), new DateTime(hoy.Year, hoy.Month, DateTime.DaysInMonth(hoy.Year, hoy.Month))).Count);
 
         t.Db.InsertarIngresoLaboralDirecto(
             t.UsuarioId, hoy, 450000, "Quincena", null);
 
         // Antes esto se acompañaba de ReiniciarRegistrosDia() y las horas desaparecían.
-        Assert.Equal(2, t.Db.ObtenerRegistrosDia(t.UsuarioId, hoy.Year, hoy.Month).Count);
+        Assert.Equal(2, t.Db.ObtenerRegistrosDia(t.UsuarioId, new DateTime(hoy.Year, hoy.Month, 1), new DateTime(hoy.Year, hoy.Month, DateTime.DaysInMonth(hoy.Year, hoy.Month))).Count);
         Assert.Empty(t.Db.VerificarIntegridad());
     }
 

@@ -50,6 +50,16 @@
                                        Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding ConfigJornada, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="48"/>
+                            <!-- Los días que se trabajan estaban clavados en 6 dentro del cálculo:
+                                 con semana de 5 la hora diaria salía un 20 % baja, y con ella
+                                 el valor de cada feriado y de cada ausencia. -->
+                            <TextBlock Text="Días que trabajás por semana"
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,12,0,5"/>
+                            <TextBox Text="{Binding ConfigDiasPorSemana, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="5"/>
+                            <TextBlock Text="{Binding HorasDiariasTexto}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="4">
@@ -112,6 +122,11 @@
                                        Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding ConfigViaticos, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="0"/>
+                            <!-- La deducción cambia por ley y estaba escrita a mano como 10,67 %. -->
+                            <TextBlock Text="Deducción sobre el bruto (%)"
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,12,0,5"/>
+                            <TextBox Text="{Binding ConfigPorcentaje, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="10.83"/>
                         </StackPanel>
 
                         <!-- Botón siempre visible -->
@@ -141,10 +156,45 @@
                 <!-- Registro del período -->
                 <Border Grid.Column="0" Style="{StaticResource Card}">
                     <StackPanel>
-                        <TextBlock FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14">
-                            <Run Text="Registro — "/>
-                            <Run Text="{Binding PeriodoActualLabel, Mode=OneWay}"/>
-                        </TextBlock>
+                        <!-- Navegación entre períodos. Antes la pantalla quedaba clavada al mes
+                             en que se construyó la vista, que además se cachea: no había forma
+                             de consultar una quincena anterior. -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Button Grid.Column="0" Content="‹"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Padding="12,2" FontSize="16"
+                                    VerticalAlignment="Center"
+                                    ToolTip="Período anterior"
+                                    Command="{Binding PeriodoAnteriorCommand}"/>
+
+                            <TextBlock Grid.Column="1" FontSize="15" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Text="{Binding PeriodoActualLabel, Mode=OneWay}"/>
+
+                            <Button Grid.Column="2" Content="›"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Padding="12,2" FontSize="16"
+                                    VerticalAlignment="Center"
+                                    ToolTip="Período siguiente"
+                                    Command="{Binding PeriodoSiguienteCommand}"/>
+                        </Grid>
+
+                        <TextBlock Text="{Binding PeriodoRangoTexto}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+
+                        <Button Content="Volver al período actual"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="12,4" FontSize="11"
+                                HorizontalAlignment="Center" Margin="0,0,0,12"
+                                Visibility="{Binding VolverAlActualVisibility}"
+                                Command="{Binding PeriodoActualCommand}"/>
 
                         <!-- Formulario agregar -->
                         <Border Background="{StaticResource SurfaceBrush}"
@@ -201,6 +251,20 @@
                                               Visibility="{Binding GoceVisibility}"/>
                                 </StackPanel>
 
+                                <!-- La ausencia se mide en horas: antes era día completo o nada,
+                                     así que faltar tres horas no se podía registrar. -->
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10"
+                                            Visibility="{Binding GoceVisibility}">
+                                    <TextBlock Text="Horas que faltaste:"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Text="{Binding RegHorasAusencia, UpdateSourceTrigger=PropertyChanged}"
+                                             Tag="día completo" FontSize="12" Width="110"/>
+                                    <TextBlock Text="Vacío = el día entero"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                </StackPanel>
+
                                 <TextBlock Text="{Binding RegError}"
                                            Foreground="{StaticResource RedBrush}"
                                            FontSize="11" Margin="0,0,0,8"
@@ -232,7 +296,7 @@
                                 </DataGridTextColumn>
                                 <DataGridTextColumn Header="Tipo"
                                                     Binding="{Binding TipoDisplay}"
-                                                    Width="140">
+                                                    Width="*" MinWidth="150">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock"><Setter Property="Padding" Value="6,0"/></Style>
                                     </DataGridTextColumn.ElementStyle>
@@ -312,7 +376,8 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="Base estimada (período completo)"
                                            Foreground="{StaticResource TextMutedBrush}"
-                                           FontSize="11" VerticalAlignment="Center"/>
+                                           FontSize="11" VerticalAlignment="Center"
+                                           TextWrapping="Wrap" Margin="0,0,8,0"/>
                                 <TextBlock Grid.Column="1" Text="{Binding ResumenSalarioBase}"
                                            FontSize="13" FontWeight="Bold"
                                            Foreground="{StaticResource AccentLightBrush}"/>
@@ -349,11 +414,17 @@
                             <TextBlock Grid.Column="1" Text="{Binding ResumenViaticos}" FontSize="12"
                                        Foreground="{StaticResource GreenBrush}"/>
                         </Grid>
-                        <Grid Margin="0,0,0,12">
+                        <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBlock Text="Ausencias sin goce (desc.)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
                             <TextBlock Grid.Column="1" Text="{Binding ResumenDescAusencias}" FontSize="12"
                                        Foreground="{StaticResource RedBrush}"/>
+                        </Grid>
+                        <!-- No descuentan, pero sin esta fila una ausencia con goce no se veía en el resumen. -->
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="Ausencias con goce (no desc.)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            <TextBlock Grid.Column="1" Text="{Binding ResumenAusenciaGoce}" FontSize="12"/>
                         </Grid>
 
                         <!-- Salario -->

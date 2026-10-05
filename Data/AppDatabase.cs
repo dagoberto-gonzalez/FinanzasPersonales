@@ -735,10 +735,12 @@ public class AppDatabase
                     DiaPago2       INTEGER NOT NULL DEFAULT 0,
                     DiaSemana      INTEGER NOT NULL DEFAULT 5,
                     Viaticos       REAL    NOT NULL DEFAULT 0,
+                    DiasPorSemana       INTEGER NOT NULL DEFAULT 5,
+                    PorcentajeDeduccion REAL    NOT NULL DEFAULT 10.83,
                     FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
                 )
                 """,
-                "UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos");
+                "UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos, DiasPorSemana, PorcentajeDeduccion");
 
             Recrear(conn, "RegistrosDiasLaborales",
                 """
@@ -751,34 +753,34 @@ public class AppDatabase
                     HorasExtraNocturnas REAL    NOT NULL DEFAULT 0,
                     HorasDobles         REAL    NOT NULL DEFAULT 0,
                     EsFeriado           INTEGER NOT NULL DEFAULT 0,
-                    EsAusencia          INTEGER NOT NULL DEFAULT 0,
+                    HorasAusencia       REAL    NOT NULL DEFAULT 0,
                     TieneGoceSalario    INTEGER NOT NULL DEFAULT 0,
                     Viaticos            REAL    NOT NULL DEFAULT 0,
                     UNIQUE(UsuarioId, Fecha),
                     FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
                 )
                 """,
-                "Id, UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas, HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos");
+                "Id, UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas, HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario, Viaticos");
 
             Recrear(conn, "PeriodosLaborales",
                 """
                 CREATE TABLE PeriodosLaborales__fk (
                     Id            INTEGER PRIMARY KEY AUTOINCREMENT,
                     UsuarioId     INTEGER NOT NULL,
-                    Anio          INTEGER NOT NULL,
-                    Mes           INTEGER NOT NULL,
+                    FechaInicio   TEXT    NOT NULL,
+                    FechaFin      TEXT    NOT NULL,
                     SalarioBruto  REAL    NOT NULL DEFAULT 0,
                     Deducciones   REAL    NOT NULL DEFAULT 0,
                     SalarioNeto   REAL    NOT NULL DEFAULT 0,
                     Cerrado       INTEGER NOT NULL DEFAULT 0,
                     TransaccionId INTEGER,
                     Notas         TEXT    NOT NULL DEFAULT '',
-                    UNIQUE(UsuarioId, Anio, Mes),
+                    UNIQUE(UsuarioId, FechaInicio),
                     FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
                     FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
                 )
                 """,
-                "Id, UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId, Notas");
+                "Id, UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId, Notas");
 
             Recrear(conn, "IngresoLaboralDirecto",
                 """
@@ -2015,7 +2017,7 @@ public class AppDatabase
                 HorasExtraNocturnas REAL    NOT NULL DEFAULT 0,
                 HorasDobles         REAL    NOT NULL DEFAULT 0,
                 EsFeriado           INTEGER NOT NULL DEFAULT 0,
-                EsAusencia          INTEGER NOT NULL DEFAULT 0,
+                HorasAusencia       REAL    NOT NULL DEFAULT 0,
                 TieneGoceSalario    INTEGER NOT NULL DEFAULT 0,
                 Viaticos            REAL    NOT NULL DEFAULT 0,
                 UNIQUE(UsuarioId, Fecha)
@@ -2023,14 +2025,14 @@ public class AppDatabase
             CREATE TABLE IF NOT EXISTS PeriodosLaborales (
                 Id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 UsuarioId     INTEGER NOT NULL,
-                Anio          INTEGER NOT NULL,
-                Mes           INTEGER NOT NULL,
+                FechaInicio   TEXT    NOT NULL,
+                FechaFin      TEXT    NOT NULL,
                 SalarioBruto  REAL    NOT NULL DEFAULT 0,
                 Deducciones   REAL    NOT NULL DEFAULT 0,
                 SalarioNeto   REAL    NOT NULL DEFAULT 0,
                 Cerrado       INTEGER NOT NULL DEFAULT 0,
                 TransaccionId INTEGER,
-                UNIQUE(UsuarioId, Anio, Mes)
+                UNIQUE(UsuarioId, FechaInicio)
             )
             """);
 
@@ -2041,9 +2043,21 @@ public class AppDatabase
         if (!cfgCols.Contains("DiaSemana")) AddColumna(conn, "ConfiguracionLaboral", "DiaSemana", "INTEGER NOT NULL DEFAULT 5");
         if (!cfgCols.Contains("Viaticos"))  AddColumna(conn, "ConfiguracionLaboral", "Viaticos",  "REAL    NOT NULL DEFAULT 0");
 
+        // Los días de la semana que se trabajan: el cálculo los tenía clavados en 6, de modo que
+        // con una semana de 5 días la hora diaria salía un 20 % baja y con ella cada feriado.
+        if (!cfgCols.Contains("DiasPorSemana"))
+            AddColumna(conn, "ConfiguracionLaboral", "DiasPorSemana", "INTEGER NOT NULL DEFAULT 5");
+
+        // La deducción cambia por ley; estaba escrita a mano como 10,67 % en cuatro sitios.
+        if (!cfgCols.Contains("PorcentajeDeduccion"))
+            AddColumna(conn, "ConfiguracionLaboral", "PorcentajeDeduccion", "REAL NOT NULL DEFAULT 10.83");
+
         // Migrar PeriodosLaborales
         var plCols = GetColumnas(conn, "PeriodosLaborales");
         if (!plCols.Contains("Notas")) AddColumna(conn, "PeriodosLaborales", "Notas", "TEXT NOT NULL DEFAULT ''");
+
+        MigrarRegistrosAAusenciaPorHoras(conn);
+        MigrarPeriodosARangoDeFechas(conn);
 
         // Tabla de ingresos laborales directos (sin necesidad de cerrar período)
         EjecutarNonQuery(conn, """
@@ -2059,12 +2073,93 @@ public class AppDatabase
             """);
     }
 
+
+    /// <summary>
+    /// La ausencia deja de ser un booleano de día completo y pasa a medirse en horas: faltar
+    /// tres horas no se podía registrar. Los días que ya estaban marcados se convierten a la
+    /// jornada diaria configurada, que es lo que significaban.
+    /// </summary>
+    private static void MigrarRegistrosAAusenciaPorHoras(SqliteConnection conn)
+    {
+        var cols = GetColumnas(conn, "RegistrosDiasLaborales");
+        if (cols.Contains("HorasAusencia")) return;
+
+        AddColumna(conn, "RegistrosDiasLaborales", "HorasAusencia", "REAL NOT NULL DEFAULT 0");
+
+        if (!cols.Contains("EsAusencia")) return;
+
+        // Un día completo vale JornadaSemanal / DiasPorSemana; si no hay configuración, 8 h.
+        EjecutarNonQuery(conn, """
+            UPDATE RegistrosDiasLaborales
+            SET HorasAusencia = COALESCE((
+                    SELECT c.JornadaSemanal / MAX(c.DiasPorSemana, 1)
+                    FROM ConfiguracionLaboral c
+                    WHERE c.UsuarioId = RegistrosDiasLaborales.UsuarioId), 8)
+            WHERE EsAusencia = 1
+            """);
+    }
+
+    /// <summary>
+    /// <c>PeriodosLaborales</c> pasa de identificarse por <c>(Anio, Mes)</c> a hacerlo por rango
+    /// de fechas. La clave única por mes hacía imposible guardar dos quincenas del mismo mes,
+    /// así que el modo "Quincenal" que ofrecía la interfaz no podía funcionar.
+    /// <para>
+    /// Los períodos que ya existieran se convierten al mes natural completo, que es lo que
+    /// representaban.
+    /// </para>
+    /// </summary>
+    private static void MigrarPeriodosARangoDeFechas(SqliteConnection conn)
+    {
+        var cols = GetColumnas(conn, "PeriodosLaborales");
+        if (cols.Contains("FechaInicio")) return;
+
+        using var tr = conn.BeginTransaction();
+        try
+        {
+            EjecutarNonQuery(conn, """
+                CREATE TABLE PeriodosLaborales__v2 (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL,
+                    FechaInicio   TEXT    NOT NULL,
+                    FechaFin      TEXT    NOT NULL,
+                    SalarioBruto  REAL    NOT NULL DEFAULT 0,
+                    Deducciones   REAL    NOT NULL DEFAULT 0,
+                    SalarioNeto   REAL    NOT NULL DEFAULT 0,
+                    Cerrado       INTEGER NOT NULL DEFAULT 0,
+                    TransaccionId INTEGER,
+                    Notas         TEXT    NOT NULL DEFAULT '',
+                    UNIQUE(UsuarioId, FechaInicio),
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """);
+
+            // Anio/Mes → el mes natural completo, que es lo que esas filas significaban.
+            EjecutarNonQuery(conn, """
+                INSERT INTO PeriodosLaborales__v2
+                    (Id, UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones,
+                     SalarioNeto, Cerrado, TransaccionId, Notas)
+                SELECT Id, UsuarioId,
+                       printf('%04d-%02d-01', Anio, Mes),
+                       date(printf('%04d-%02d-01', Anio, Mes), '+1 month', '-1 day'),
+                       SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId,
+                       COALESCE(Notas, '')
+                FROM PeriodosLaborales
+                """);
+
+            EjecutarNonQuery(conn, "DROP TABLE PeriodosLaborales");
+            EjecutarNonQuery(conn, "ALTER TABLE PeriodosLaborales__v2 RENAME TO PeriodosLaborales");
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
+    }
     public ConfiguracionLaboral ObtenerConfiguracionLaboral(int usuarioId)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos
+            SELECT SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos,
+                   DiasPorSemana, PorcentajeDeduccion
             FROM ConfiguracionLaboral WHERE UsuarioId=$uid
             """;
         cmd.Parameters.AddWithValue("$uid", usuarioId);
@@ -2079,7 +2174,9 @@ public class AppDatabase
                 ModoPago       = r.IsDBNull(3) ? "Mensual" : r.GetString(3),
                 DiaPago2       = r.IsDBNull(4) ? 0         : r.GetInt32(4),
                 DiaSemana      = r.IsDBNull(5) ? 5         : r.GetInt32(5),
-                Viaticos       = r.IsDBNull(6) ? 0m        : (decimal)r.GetDouble(6)
+                Viaticos       = r.IsDBNull(6) ? 0m        : (decimal)r.GetDouble(6),
+                DiasPorSemana  = r.IsDBNull(7) ? 5         : r.GetInt32(7),
+                PorcentajeDeduccion = r.IsDBNull(8) ? 10.83m : (decimal)r.GetDouble(8)
             };
         return new ConfiguracionLaboral { UsuarioId = usuarioId };
     }
@@ -2089,43 +2186,38 @@ public class AppDatabase
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
-            INSERT INTO ConfiguracionLaboral (UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos)
-            VALUES ($uid,$sph,$js,$dp,$mp,$dp2,$ds,$vt)
+            INSERT INTO ConfiguracionLaboral (UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos, DiasPorSemana, PorcentajeDeduccion)
+            VALUES ($uid,$sph,$js,$dp,$mp,$dp2,$ds,$vt,$dxs,$pct)
             ON CONFLICT(UsuarioId) DO UPDATE SET
                 SalarioPorHora=$sph, JornadaSemanal=$js, DiaPago=$dp,
-                ModoPago=$mp, DiaPago2=$dp2, DiaSemana=$ds, Viaticos=$vt
+                ModoPago=$mp, DiaPago2=$dp2, DiaSemana=$ds, Viaticos=$vt,
+                DiasPorSemana=$dxs, PorcentajeDeduccion=$pct
             """,
             ("$uid", c.UsuarioId), ("$sph", (double)c.SalarioPorHora),
             ("$js",  (double)c.JornadaSemanal), ("$dp",  c.DiaPago),
             ("$mp",  c.ModoPago),       ("$dp2", c.DiaPago2),
-            ("$ds",  c.DiaSemana),      ("$vt",  (double)c.Viaticos));
+            ("$ds",  c.DiaSemana),      ("$vt",  (double)c.Viaticos),
+            ("$dxs", c.DiasPorSemana), ("$pct", (double)c.PorcentajeDeduccion));
     }
 
-    public List<RegistroDiaLaboral> ObtenerRegistrosDia(int usuarioId, int anio, int mes)
+    /// <summary>
+    /// Registros de un rango de fechas. Antes se pedían por mes natural, que es justo lo que no
+    /// coincide con un período quincenal: la base era de quince días y las horas, de treinta.
+    /// </summary>
+    public List<RegistroDiaLaboral> ObtenerRegistrosDia(int usuarioId, DateTime inicio, DateTime fin)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Id, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas,
-                   HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos
+                   HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario, Viaticos
             FROM RegistrosDiasLaborales
-            WHERE UsuarioId=$uid AND strftime('%Y',$col)=$anio AND strftime('%m',$col)=$mes
+            WHERE UsuarioId=$uid AND Fecha >= $inicio AND Fecha <= $fin
             ORDER BY Fecha
             """;
-        // trick: bind Fecha column literal separately from the date filter values
-        cmd.CommandText = """
-            SELECT Id, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas,
-                   HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos
-            FROM RegistrosDiasLaborales
-            WHERE UsuarioId=$uid
-              AND Fecha >= $inicio AND Fecha <= $fin
-            ORDER BY Fecha
-            """;
-        var inicio = new DateTime(anio, mes, 1).ToString("yyyy-MM-dd");
-        var fin    = new DateTime(anio, mes, DateTime.DaysInMonth(anio, mes)).ToString("yyyy-MM-dd");
-        cmd.Parameters.AddWithValue("$uid",   usuarioId);
-        cmd.Parameters.AddWithValue("$inicio", inicio);
-        cmd.Parameters.AddWithValue("$fin",    fin);
+        cmd.Parameters.AddWithValue("$uid",    usuarioId);
+        cmd.Parameters.AddWithValue("$inicio", inicio.ToString("yyyy-MM-dd"));
+        cmd.Parameters.AddWithValue("$fin",    fin.ToString("yyyy-MM-dd"));
 
         var list = new List<RegistroDiaLaboral>();
         using var r = cmd.ExecuteReader();
@@ -2140,7 +2232,7 @@ public class AppDatabase
                 HorasExtraNocturnas = r.GetDouble(4),
                 HorasDobles         = r.GetDouble(5),
                 EsFeriado           = r.GetInt32(6) == 1,
-                EsAusencia          = r.GetInt32(7) == 1,
+                HorasAusencia       = r.GetDouble(7),
                 TieneGoceSalario    = r.GetInt32(8) == 1,
                 Viaticos            = (decimal)r.GetDouble(9)
             });
@@ -2154,11 +2246,11 @@ public class AppDatabase
             """
             INSERT INTO RegistrosDiasLaborales
                 (UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas,
-                 HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos)
-            VALUES ($uid, $f, $hn, $hed, $hen, $hd, $ef, $ea, $tg, $vt)
+                 HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario, Viaticos)
+            VALUES ($uid, $f, $hn, $hed, $hen, $hd, $ef, $ha, $tg, $vt)
             ON CONFLICT(UsuarioId, Fecha) DO UPDATE SET
                 HorasNormales=$hn, HorasExtraDiurnas=$hed, HorasExtraNocturnas=$hen,
-                HorasDobles=$hd, EsFeriado=$ef, EsAusencia=$ea, TieneGoceSalario=$tg, Viaticos=$vt
+                HorasDobles=$hd, EsFeriado=$ef, HorasAusencia=$ha, TieneGoceSalario=$tg, Viaticos=$vt
             """,
             ("$uid", reg.UsuarioId),
             ("$f",   reg.Fecha.ToString("yyyy-MM-dd")),
@@ -2167,7 +2259,7 @@ public class AppDatabase
             ("$hen", reg.HorasExtraNocturnas),
             ("$hd",  reg.HorasDobles),
             ("$ef",  reg.EsFeriado   ? 1 : 0),
-            ("$ea",  reg.EsAusencia  ? 1 : 0),
+            ("$ha",  reg.HorasAusencia),
             ("$tg",  reg.TieneGoceSalario ? 1 : 0),
             ("$vt",  (double)reg.Viaticos));
     }
@@ -2183,10 +2275,11 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT Id, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId, Notas
+            SELECT Id, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto,
+                   Cerrado, TransaccionId, Notas
             FROM PeriodosLaborales
             WHERE UsuarioId=$uid
-            ORDER BY Anio DESC, Mes DESC
+            ORDER BY FechaInicio DESC
             """;
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<PeriodoLaboral>();
@@ -2196,8 +2289,8 @@ public class AppDatabase
             {
                 Id            = r.GetInt32(0),
                 UsuarioId     = usuarioId,
-                Anio          = r.GetInt32(1),
-                Mes           = r.GetInt32(2),
+                FechaInicio   = DateTime.Parse(r.GetString(1)),
+                FechaFin      = DateTime.Parse(r.GetString(2)),
                 SalarioBruto  = (decimal)r.GetDouble(3),
                 Deducciones   = (decimal)r.GetDouble(4),
                 SalarioNeto   = (decimal)r.GetDouble(5),
@@ -2319,12 +2412,15 @@ public class AppDatabase
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = """
+                -- Un período laboral ya no coincide con un mes: puede haber dos en el mismo mes
+                -- y cruzar de uno a otro. Cuenta cualquiera que se solape con el mes cerrado.
                 SELECT COUNT(*) FROM PeriodosLaborales
-                WHERE UsuarioId=$uid AND Anio=$anio AND Mes=$mes AND Cerrado=1
+                WHERE UsuarioId=$uid AND Cerrado=1
+                  AND FechaInicio <= $hasta AND FechaFin >= $desde
                 """;
-            cmd.Parameters.AddWithValue("$uid",  usuarioId);
-            cmd.Parameters.AddWithValue("$anio", anio);
-            cmd.Parameters.AddWithValue("$mes",  mes);
+            cmd.Parameters.AddWithValue("$uid",   usuarioId);
+            cmd.Parameters.AddWithValue("$desde", desde);
+            cmd.Parameters.AddWithValue("$hasta", hasta);
             periodoLaboral = (long)cmd.ExecuteScalar()! > 0;
         }
 
@@ -2396,76 +2492,38 @@ public class AppDatabase
     /// Consolida el resumen del período en PeriodosLaborales SIN generar ingreso automático.
     /// TransaccionId queda NULL — el ingreso se registra por separado si el usuario lo desea.
     /// </summary>
-    public void ConsolidarPeriodoLaboral(int usuarioId, int anio, int mes,
+    public void ConsolidarPeriodoLaboral(int usuarioId, DateTime inicio, DateTime fin,
         decimal salarioBruto, decimal deducciones, decimal salarioNeto)
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
-            INSERT INTO PeriodosLaborales (UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado)
-            VALUES ($uid, $a, $m, $sb, $ded, $sn, 1)
-            ON CONFLICT(UsuarioId, Anio, Mes) DO UPDATE SET
-                SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1
+            INSERT INTO PeriodosLaborales (UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto, Cerrado)
+            VALUES ($uid, $ini, $fin, $sb, $ded, $sn, 1)
+            ON CONFLICT(UsuarioId, FechaInicio) DO UPDATE SET
+                FechaFin=$fin, SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1
             """,
-            ("$uid", usuarioId), ("$a", anio), ("$m", mes),
+            ("$uid", usuarioId),
+            ("$ini", inicio.ToString("yyyy-MM-dd")), ("$fin", fin.ToString("yyyy-MM-dd")),
             ("$sb",  (double)salarioBruto), ("$ded", (double)deducciones),
             ("$sn",  (double)salarioNeto));
     }
 
-    /// <summary>Elimina todos los registros diarios del período indicado.</summary>
-    public void ReiniciarRegistrosDia(int usuarioId, int anio, int mes)
+    /// <summary>Elimina los registros diarios de un rango de fechas.</summary>
+    public void ReiniciarRegistrosDia(int usuarioId, DateTime inicio, DateTime fin)
     {
         using var conn = Abrir();
-        var mesStr = mes.ToString("D2");
         EjecutarNonQuery(conn,
             """
             DELETE FROM RegistrosDiasLaborales
-            WHERE UsuarioId = $uid
-              AND strftime('%Y', Fecha) = $anio
-              AND strftime('%m', Fecha) = $mes
+            WHERE UsuarioId = $uid AND Fecha >= $ini AND Fecha <= $fin
             """,
-            ("$uid", usuarioId), ("$anio", anio.ToString()), ("$mes", mesStr));
+            ("$uid", usuarioId),
+            ("$ini", inicio.ToString("yyyy-MM-dd")), ("$fin", fin.ToString("yyyy-MM-dd")));
     }
-
-    public int CerrarPeriodoLaboral(int usuarioId, int anio, int mes,
-        decimal salarioBruto, decimal deducciones, decimal salarioNeto)
-    {
-        using var conn = Abrir();
-        using var tr   = conn.BeginTransaction();
-        try
-        {
-            // Insertar la transacción de ingreso
-            var fecha = new DateTime(anio, mes, DateTime.DaysInMonth(anio, mes));
-            using var cmdIns = conn.CreateCommand();
-            cmdIns.CommandText = """
-                INSERT INTO Transacciones
-                    (UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre)
-                VALUES ($uid, 'Ingreso', $monto, 'Salario', $desc, $fecha, 'Salario neto del período laboral', 'Efectivo');
-                SELECT last_insert_rowid()
-                """;
-            cmdIns.Parameters.AddWithValue("$uid",   usuarioId);
-            cmdIns.Parameters.AddWithValue("$monto", (double)salarioNeto);
-            cmdIns.Parameters.AddWithValue("$desc",  $"Salario {new DateTime(anio, mes, 1):MMMM yyyy}");
-            cmdIns.Parameters.AddWithValue("$fecha", fecha.ToString("yyyy-MM-dd"));
-            var tid = (int)(long)cmdIns.ExecuteScalar()!;
-
-            // Insertar o actualizar el período
-            EjecutarNonQuery(conn,
-                """
-                INSERT INTO PeriodosLaborales (UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId)
-                VALUES ($uid, $a, $m, $sb, $ded, $sn, 1, $tid)
-                ON CONFLICT(UsuarioId, Anio, Mes) DO UPDATE SET
-                    SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1, TransaccionId=$tid
-                """,
-                ("$uid", usuarioId), ("$a", anio), ("$m", mes),
-                ("$sb",  (double)salarioBruto), ("$ded", (double)deducciones),
-                ("$sn",  (double)salarioNeto),  ("$tid", tid));
-
-            tr.Commit();
-            return tid;
-        }
-        catch { tr.Rollback(); throw; }
-    }
+    // CerrarPeriodoLaboral() se eliminó: nunca llegó a llamarse desde ninguna pantalla y su
+    // firma quedó obsoleta al pasar los períodos a rangos de fechas. Si más adelante el cierre
+    // debe generar la transacción de salario, se escribe de nuevo contra el modelo actual.
 
     // ── Ingresos laborales directos ───────────────────────────────────────────
 

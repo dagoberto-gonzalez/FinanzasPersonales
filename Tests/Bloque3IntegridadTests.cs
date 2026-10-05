@@ -217,7 +217,8 @@ public class Bloque3IntegridadTests
         {
             UsuarioId = otro, Fecha = new DateTime(2026, 9, 1), HorasExtraDiurnas = 3
         });
-        t.Db.ConsolidarPeriodoLaboral(otro, 2026, 9, 800000, 86400, 713600);
+        t.Db.ConsolidarPeriodoLaboral(otro, new DateTime(2026, 9, 1), new DateTime(2026, 9, 30),
+                                      800000, 86400, 713600);
         t.Db.InsertarIngresoLaboralDirecto(otro, new DateTime(2026, 9, 15), 400000, "Quincena", null);
         t.Db.CerrarMes(otro, 2026, 9);
         // Y algunas de las que sí se limpiaban.

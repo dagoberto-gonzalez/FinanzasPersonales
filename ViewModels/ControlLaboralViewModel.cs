@@ -21,11 +21,38 @@ public class ControlLaboralViewModel : BaseViewModel
     public IReadOnlyList<string> DiasSemana { get; } = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
     // ── Estado del período ────────────────────────────────────────────────────
-    private int _anio;
-    private int _mes;
+    // El período es un RANGO DE FECHAS, no un mes. Ese era el fallo de fondo del módulo: la
+    // base se calculaba por quincena pero las horas se sumaban del mes entero.
+    private ConfiguracionLaboral _cfg = new();
+    private DateTime _inicio;
+    private DateTime _fin;
+
+    // Inyectable para poder probar el paso de un período al siguiente.
+    private readonly Func<DateTime> _hoy;
+
+    // Si se está mirando el período de hoy, hay que seguirlo cuando cambie la fecha. Se recuerda
+    // al navegar: deducirlo en cada carga comparando con el período de hoy falla justo cuando
+    // importa, porque al cambiar de quincena el de hoy ya es otro.
+    private bool _siguiendoAlActual = true;
 
     public string PeriodoActualLabel =>
-        new DateTime(_anio, _mes, 1).ToString("MMMM yyyy", CrCulture);
+        new PeriodoLaboral { FechaInicio = _inicio, FechaFin = _fin }.Label;
+
+    public string PeriodoRangoTexto =>
+        $"{_inicio:dd/MM/yyyy} — {_fin:dd/MM/yyyy}  ·  {(_fin - _inicio).Days + 1} días";
+
+    /// <summary>Para poder resaltar cuándo se está mirando otro período distinto del de hoy.</summary>
+    public bool EsPeriodoActual
+    {
+        get
+        {
+            var hoy = _cfg.PeriodoQueContiene(_hoy());
+            return hoy.Inicio == _inicio && hoy.Fin == _fin;
+        }
+    }
+
+    public Visibility VolverAlActualVisibility =>
+        EsPeriodoActual ? Visibility.Collapsed : Visibility.Visible;
 
     // ── Configuración — campos internos ──────────────────────────────────────
     private decimal _salXHora;
@@ -89,6 +116,32 @@ public class ControlLaboralViewModel : BaseViewModel
         get => _cfgViaticos;
         set { _cfgViaticos = value; OnPropertyChanged(); }
     }
+
+    private string _cfgDiasPorSemana = "5";
+    private string _cfgPorcentaje     = "10.83";
+
+    /// <summary>Días trabajados por semana. Estaba clavado en 6 dentro del cálculo.</summary>
+    public string ConfigDiasPorSemana
+    {
+        get => _cfgDiasPorSemana;
+        set { _cfgDiasPorSemana = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Porcentaje de deducción sobre el bruto. Cambia por ley.</summary>
+    public string ConfigPorcentaje
+    {
+        get => _cfgPorcentaje;
+        set { _cfgPorcentaje = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>
+    /// Muestra a cuánto sale la hora diaria con lo configurado. Es el número del que dependen
+    /// el valor de un feriado y el de una ausencia, y antes salía de un 6 invisible.
+    /// </summary>
+    public string HorasDiariasTexto =>
+        _cfg.HorasDiarias > 0
+            ? $"Un día son {_cfg.HorasDiarias:0.##} h · es lo que vale un feriado o una ausencia completa"
+            : "";
     public string ConfigMensaje
     {
         get => _cfgMensaje;
@@ -151,6 +204,15 @@ public class ControlLaboralViewModel : BaseViewModel
     {
         get => _regTieneGoce;
         set { _regTieneGoce = value; OnPropertyChanged(); }
+    }
+
+    private string _regHorasAusencia = "";
+
+    /// <summary>Horas que se faltaron. Vacío significa el día completo.</summary>
+    public string RegHorasAusencia
+    {
+        get => _regHorasAusencia;
+        set { _regHorasAusencia = value; OnPropertyChanged(); }
     }
     public string RegError
     {
@@ -264,6 +326,11 @@ public class ControlLaboralViewModel : BaseViewModel
     public RelayCommand CerrarPeriodoCommand   { get; }
     public RelayCommand ExportarPdfCommand     { get; }
 
+    // Navegación entre períodos: antes la pantalla estaba clavada al mes de arranque.
+    public RelayCommand PeriodoAnteriorCommand  { get; }
+    public RelayCommand PeriodoSiguienteCommand { get; }
+    public RelayCommand PeriodoActualCommand    { get; }
+
     // Historial — editar cierre
     public RelayCommand<HistorialLaboralItem> EditarCierreCommand   { get; }
     public RelayCommand                       GuardarEdicionCommand  { get; }
@@ -272,10 +339,11 @@ public class ControlLaboralViewModel : BaseViewModel
     // Historial — eliminar
     public RelayCommand<HistorialLaboralItem> EliminarHistorialItemCommand { get; }
 
-    public ControlLaboralViewModel(AppDatabase db, int usuarioId)
+    public ControlLaboralViewModel(AppDatabase db, int usuarioId, Func<DateTime>? hoy = null)
     {
         _db  = db;
         _uid = usuarioId;
+        _hoy = hoy ?? (() => DateTime.Today);
 
         GuardarConfigCommand   = new RelayCommand(GuardarConfig);
         AgregarRegistroCommand = new RelayCommand(AgregarRegistro);
@@ -299,23 +367,49 @@ public class ControlLaboralViewModel : BaseViewModel
 
         EliminarHistorialItemCommand = new RelayCommand<HistorialLaboralItem>(EliminarHistorialItem);
 
-        var ahora = DateTime.Now;
-        _anio = ahora.Year;
-        _mes  = ahora.Month;
+        PeriodoAnteriorCommand  = new RelayCommand(() => IrAlPeriodo(_cfg.PeriodoAnterior(_inicio)));
+        PeriodoSiguienteCommand = new RelayCommand(() => IrAlPeriodo(_cfg.PeriodoSiguiente(_fin)));
+        PeriodoActualCommand    = new RelayCommand(() => IrAlPeriodo(_cfg.PeriodoQueContiene(_hoy())));
 
         Cargar();
     }
 
+    /// <summary>
+    /// Cambia el período mostrado. Antes no existía: el mes se fijaba al construir la vista, que
+    /// se cachea, así que la pantalla seguía mostrando el mes viejo tras pasar la medianoche del
+    /// último día — y no había forma de consultar un período anterior.
+    /// </summary>
+    private void IrAlPeriodo((DateTime Inicio, DateTime Fin) periodo)
+    {
+        _inicio = periodo.Inicio;
+        _fin    = periodo.Fin;
+        _siguiendoAlActual = EsPeriodoActual;
+        CargarRegistros();
+        ActualizarResumen();
+        NotificarPeriodo();
+    }
+
+    private void NotificarPeriodo()
+    {
+        OnPropertyChanged(nameof(PeriodoActualLabel));
+        OnPropertyChanged(nameof(PeriodoRangoTexto));
+        OnPropertyChanged(nameof(EsPeriodoActual));
+        // La vista enlaza esta, no EsPeriodoActual: sin notificarla, el botón de volver
+        // al período actual nunca aparecía al navegar.
+        OnPropertyChanged(nameof(VolverAlActualVisibility));
+        OnPropertyChanged(nameof(HorasDiariasTexto));
+    }
+
     public void Cargar()
     {
-        var cfg = _db.ObtenerConfiguracionLaboral(_uid);
-        _salXHora       = cfg.SalarioPorHora;
-        _jornadaSemanal = cfg.JornadaSemanal;
-        _modoPago       = cfg.ModoPago;
-        _diaPago        = cfg.DiaPago;
-        _diaPago2       = cfg.DiaPago2;
-        _diaSemana      = cfg.DiaSemana;
-        _viaticos       = cfg.Viaticos;
+        _cfg = _db.ObtenerConfiguracionLaboral(_uid);
+        _salXHora       = _cfg.SalarioPorHora;
+        _jornadaSemanal = _cfg.JornadaSemanal;
+        _modoPago       = _cfg.ModoPago;
+        _diaPago        = _cfg.DiaPago;
+        _diaPago2       = _cfg.DiaPago2;
+        _diaSemana      = _cfg.DiaSemana;
+        _viaticos       = _cfg.Viaticos;
 
         ConfigSalarioXHora = _salXHora.ToString("F0");
         ConfigJornada      = _jornadaSemanal.ToString("G", CultureInfo.InvariantCulture);
@@ -324,6 +418,13 @@ public class ControlLaboralViewModel : BaseViewModel
         ConfigDiaPago2     = _diaPago2 > 0 ? _diaPago2.ToString() : "30";
         ConfigDiaSemana    = DiaSemanaToString(_diaSemana);
         ConfigViaticos     = _viaticos.ToString("F0");
+        ConfigDiasPorSemana = _cfg.DiasPorSemana.ToString();
+        ConfigPorcentaje    = _cfg.PorcentajeDeduccion.ToString("0.##", CultureInfo.InvariantCulture);
+
+        // El período se recalcula en cada carga: la vista se cachea, así que si se fijara sólo
+        // al construirla seguiría mostrando el período viejo tras cambiar de quincena.
+        if (_siguiendoAlActual || _inicio == default)
+            (_inicio, _fin) = _cfg.PeriodoQueContiene(_hoy());
 
         // Cargar cuentas para el ComboBox de la ventana de ingreso
         Cuentas.Clear();
@@ -334,12 +435,14 @@ public class ControlLaboralViewModel : BaseViewModel
         CargarHistorial();
         ActualizarResumen();
         ActualizarAlertas();
+        NotificarPeriodo();
     }
 
     private void CargarRegistros()
     {
         Registros.Clear();
-        foreach (var r in _db.ObtenerRegistrosDia(_uid, _anio, _mes))
+        // Del RANGO del período, no del mes natural: ahí estaba el desajuste.
+        foreach (var r in _db.ObtenerRegistrosDia(_uid, _inicio, _fin))
             Registros.Add(r);
     }
 
@@ -358,8 +461,8 @@ public class ControlLaboralViewModel : BaseViewModel
             items.Add(new HistorialLaboralItem
             {
                 EsCierre      = true,
-                Fecha         = new DateTime(p.Anio, p.Mes, DateTime.DaysInMonth(p.Anio, p.Mes)),
-                Label         = p.MesLabel,
+                Fecha         = p.FechaFin,
+                Label         = p.Label,
                 Bruto         = p.SalarioBruto,
                 Deducciones   = p.Deducciones,
                 Monto         = p.SalarioNeto,
@@ -417,16 +520,10 @@ public class ControlLaboralViewModel : BaseViewModel
 
     private void ActualizarResumen()
     {
-        decimal periodoBase = 0;
-        if (_salXHora > 0)
-        {
-            periodoBase = _modoPago switch
-            {
-                "Semanal"   => Math.Round(_salXHora * _jornadaSemanal, 0),
-                "Quincenal" => Math.Round(_salXHora * _jornadaSemanal * 52m / 24m, 0),
-                _           => Math.Round(_salXHora * _jornadaSemanal * 52m / 12m, 0)
-            };
-        }
+        // La base se calcula sobre los MISMOS días que se suman abajo. Antes era una constante
+        // por modo de pago —en quincenal, la base de quince días— mientras las horas extra se
+        // sumaban del mes entero.
+        decimal periodoBase = _cfg.SalarioBaseDe(_inicio, _fin);
         ResumenSalarioBase = _salXHora > 0 ? $"₡{periodoBase:N0}" : "Configura el salario";
         OnPropertyChanged(nameof(ResumenSalarioBase));
 
@@ -439,20 +536,24 @@ public class ControlLaboralViewModel : BaseViewModel
             return;
         }
 
-        decimal horasDiarias = _jornadaSemanal / 6m;
+        // Sale de los días que se trabajan, no de un 6 clavado: con semana de 5 días el valor
+        // de la hora diaria salía un 20 % bajo, y con él cada feriado y cada ausencia.
+        decimal horasDiarias = _cfg.HorasDiarias;
 
-        double totalExtraD     = Registros.Sum(r => r.HorasExtraDiurnas);
-        double totalExtraN     = Registros.Sum(r => r.HorasExtraNocturnas);
-        double totalDobles     = Registros.Sum(r => r.HorasDobles);
-        int    feriadosDias    = Registros.Count(r => r.EsFeriado && !r.EsAusencia);
-        int    ausenciaSinGoce = Registros.Count(r => r.EsAusencia && !r.TieneGoceSalario);
-        int    ausenciaGoce    = Registros.Count(r => r.EsAusencia && r.TieneGoceSalario);
+        double totalExtraD  = Registros.Sum(r => r.HorasExtraDiurnas);
+        double totalExtraN  = Registros.Sum(r => r.HorasExtraNocturnas);
+        double totalDobles  = Registros.Sum(r => r.HorasDobles);
+        int    feriadosDias = Registros.Count(r => r.EsFeriado && !r.EsAusencia);
+
+        // La ausencia se mide en horas: faltar tres horas no se podía registrar.
+        double horasSinGoce = Registros.Where(r => !r.TieneGoceSalario).Sum(r => r.HorasAusencia);
+        double horasConGoce = Registros.Where(r =>  r.TieneGoceSalario).Sum(r => r.HorasAusencia);
 
         decimal montoExtraD   = Math.Round((decimal)totalExtraD * _salXHora * 1.5m,  0);
         decimal montoExtraN   = Math.Round((decimal)totalExtraN * _salXHora * 1.75m, 0);
         decimal montoDobles   = Math.Round((decimal)totalDobles * _salXHora * 2m,    0);
         decimal montoFeriados = Math.Round(feriadosDias * horasDiarias * _salXHora, 0);
-        decimal descAusencias = Math.Round(ausenciaSinGoce * horasDiarias * _salXHora, 0);
+        decimal descAusencias = Math.Round((decimal)horasSinGoce * _salXHora, 0);
 
         decimal salarioBruto = periodoBase
             + montoExtraD + montoExtraN + montoDobles
@@ -460,7 +561,8 @@ public class ControlLaboralViewModel : BaseViewModel
             - descAusencias;
         if (salarioBruto < 0) salarioBruto = 0;
 
-        decimal deduccionCCSS = Math.Round(salarioBruto * (decimal)TasaCCSS, 0);
+        // Porcentaje configurable: estaba clavado como 10,67 % y cambia por ley.
+        decimal deduccionCCSS = Math.Round(salarioBruto * _cfg.PorcentajeDeduccion / 100m, 0);
         decimal salarioNeto   = salarioBruto - deduccionCCSS;
 
         decimal aguinaldo  = Math.Round(salarioBruto / 12m, 0);
@@ -475,10 +577,10 @@ public class ControlLaboralViewModel : BaseViewModel
         ResumenDobles        = $"{totalDobles:N1} h  →  ₡{montoDobles:N0}";
         ResumenFeriados      = $"{feriadosDias} día{(feriadosDias == 1 ? "" : "s")}  →  ₡{montoFeriados:N0}";
         ResumenViaticos      = $"₡{_viaticos:N0}";
-        ResumenDescAusencias = $"{ausenciaSinGoce} día{(ausenciaSinGoce == 1 ? "" : "s")}  →  -₡{descAusencias:N0}";
-        ResumenAusenciaGoce  = $"{ausenciaGoce} día{(ausenciaGoce == 1 ? "" : "s")}";
+        ResumenDescAusencias = $"{horasSinGoce:N1} h  →  -₡{descAusencias:N0}";
+        ResumenAusenciaGoce  = $"{horasConGoce:N1} h";
         ResumenSalarioBruto  = $"₡{salarioBruto:N0}";
-        ResumenDeduccionCCSS = $"-₡{deduccionCCSS:N0}  (10.67%)";
+        ResumenDeduccionCCSS = $"-₡{deduccionCCSS:N0}  ({_cfg.PorcentajeDeduccion:0.##}%)";
         ResumenSalarioNeto   = $"₡{salarioNeto:N0}";
         ResumenAguinaldo     = $"₡{aguinaldo:N0}";
         ResumenVacaciones    = $"₡{vacaciones:N0}";
@@ -486,7 +588,7 @@ public class ControlLaboralViewModel : BaseViewModel
         NotifyResumen();
 
         var periodos = _db.ObtenerPeriodosLaborales(_uid);
-        var actual   = periodos.FirstOrDefault(p => p.Anio == _anio && p.Mes == _mes);
+        var actual   = periodos.FirstOrDefault(p => p.FechaInicio.Date == _inicio.Date);
         if (actual?.Cerrado == true)
         {
             PeriodoCerradoVisibility = Visibility.Visible;
@@ -522,7 +624,7 @@ public class ControlLaboralViewModel : BaseViewModel
 
     private void ActualizarAlertas()
     {
-        var hoy     = DateTime.Today;
+        var hoy     = _hoy();
         int diasRest = DiasHastaPago(hoy);
 
         if (diasRest >= 0 && diasRest <= 3)
@@ -613,6 +715,15 @@ public class ControlLaboralViewModel : BaseViewModel
         {
             ConfigMensaje = "Viáticos inválidos."; ConfigMensajeOk = false; return;
         }
+        if (!int.TryParse(_cfgDiasPorSemana, out int diasPorSemana) || diasPorSemana is < 1 or > 7)
+        {
+            ConfigMensaje = "Días por semana inválidos (1–7)."; ConfigMensajeOk = false; return;
+        }
+        if (!decimal.TryParse(_cfgPorcentaje.Replace(",", "."), NumberStyles.Any,
+            CultureInfo.InvariantCulture, out decimal porcentaje) || porcentaje is < 0m or > 100m)
+        {
+            ConfigMensaje = "Porcentaje de deducción inválido (0–100)."; ConfigMensajeOk = false; return;
+        }
 
         int diaPago = 0, diaPago2 = 0, diaSemana = 5;
         switch (_cfgModoPago)
@@ -645,11 +756,16 @@ public class ControlLaboralViewModel : BaseViewModel
             DiaPago        = diaPago,
             DiaPago2       = diaPago2,
             DiaSemana      = diaSemana,
-            Viaticos       = viaticos
+            Viaticos       = viaticos,
+            DiasPorSemana       = diasPorSemana,
+            PorcentajeDeduccion = porcentaje
         });
 
         ConfigMensaje   = "Configuración guardada.";
         ConfigMensajeOk = true;
+        // Con otro modo de pago o días de corte, el rango que se estaba mirando ya no es un
+        // período válido: se vuelve al de hoy.
+        _siguiendoAlActual = true;
         Cargar();
     }
 
@@ -670,6 +786,16 @@ public class ControlLaboralViewModel : BaseViewModel
         if (!double.TryParse(_regHorasExtraNocturnas.Replace(",", "."), NumberStyles.Any, CultureInfo.InvariantCulture, out double hen)) hen = 0;
         if (!double.TryParse(_regHorasDobles.Replace(",", "."),         NumberStyles.Any, CultureInfo.InvariantCulture, out double hd))  hd  = 0;
 
+        // La ausencia se mide en horas. Si se marca sin indicar cuántas, se entiende el día
+        // completo, que es lo que significaba el booleano anterior.
+        double horasAusencia = 0;
+        if (_regEsAusencia)
+        {
+            if (!double.TryParse(_regHorasAusencia.Replace(",", "."), NumberStyles.Any,
+                                 CultureInfo.InvariantCulture, out horasAusencia) || horasAusencia <= 0)
+                horasAusencia = (double)_cfg.HorasDiarias;
+        }
+
         var reg = new RegistroDiaLaboral
         {
             UsuarioId           = _uid,
@@ -679,7 +805,7 @@ public class ControlLaboralViewModel : BaseViewModel
             HorasExtraNocturnas = Math.Max(0, hen),
             HorasDobles         = Math.Max(0, hd),
             EsFeriado           = _regEsFeriado,
-            EsAusencia          = _regEsAusencia,
+            HorasAusencia       = Math.Max(0, horasAusencia),
             TieneGoceSalario    = _regEsAusencia && _regTieneGoce,
             Viaticos            = 0
         };
@@ -717,7 +843,7 @@ public class ControlLaboralViewModel : BaseViewModel
 
         if (res != MessageBoxResult.Yes) return;
 
-        _db.ConsolidarPeriodoLaboral(_uid, _anio, _mes,
+        _db.ConsolidarPeriodoLaboral(_uid, _inicio, _fin,
             _salarioBrutoCalc, _deduccionesCalc, _salarioNetoCalc);
 
         CargarHistorial();
