@@ -218,6 +218,8 @@
                                         <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="10"/>
                                         <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="90"/>
                                     </Grid.ColumnDefinitions>
 
                                     <StackPanel Grid.Column="0">
@@ -243,12 +245,19 @@
                                         <TextBox Text="{Binding RegHorasDobles, UpdateSourceTrigger=PropertyChanged}"
                                                  Tag="0" FontSize="12"/>
                                     </StackPanel>
+
+                                    <!-- Horas trabajadas en feriado, pagadas a 1× sobre el salario fijo
+                                         ("Horas Normales" en la planilla). Antes era una casilla
+                                         que valía siempre la jornada diaria. -->
+                                    <StackPanel Grid.Column="8">
+                                        <TextBlock Text="H. Feriado" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                        <TextBox Text="{Binding RegHorasFeriado, UpdateSourceTrigger=PropertyChanged}"
+                                                 Tag="0" FontSize="12"/>
+                                    </StackPanel>
                                 </Grid>
 
                                 <!-- Checkboxes -->
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,10">
-                                    <CheckBox Content="Feriado (200%)" IsChecked="{Binding RegEsFeriado}"
-                                              Foreground="{StaticResource TextBrush}" Margin="0,0,20,0"/>
                                     <CheckBox Content="Ausencia" IsChecked="{Binding RegEsAusencia}"
                                               Foreground="{StaticResource TextBrush}" Margin="0,0,20,0"/>
                                     <CheckBox Content="Con goce de salario" IsChecked="{Binding RegTieneGoce}"
@@ -410,7 +419,7 @@
                         </Grid>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBlock Text="Feriados trabajados" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            <TextBlock Text="Feriados (horas a 1×)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
                             <TextBlock Grid.Column="1" Text="{Binding ResumenFeriados}" FontSize="12"/>
                         </Grid>
                         <Grid Margin="0,0,0,4">
@@ -568,6 +577,7 @@
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <Grid.Resources>
                                         <!-- Más compactas que las del resto de la app (42 px): son
@@ -592,38 +602,44 @@
                                     <TextBox   Grid.Row="1" Grid.Column="3" Margin="0,0,0,6" Tag="215 115,38"
                                                Text="{Binding CompSalarioFijo, UpdateSourceTrigger=PropertyChanged}"/>
 
-                                    <TextBlock Grid.Row="2" Text="Horas extra" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBlock Grid.Row="2" Text="Horas normales (feriado)" Style="{StaticResource EtiquetaComp}"/>
                                     <TextBox   Grid.Row="2" Grid.Column="1" Margin="0,0,0,6" Tag="0"
-                                               Text="{Binding CompHorasExtra, UpdateSourceTrigger=PropertyChanged}"/>
+                                               Text="{Binding CompHorasNormales, UpdateSourceTrigger=PropertyChanged}"/>
                                     <TextBox   Grid.Row="2" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompMontoNormales, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="3" Text="Horas extra" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="3" Grid.Column="1" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompHorasExtra, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBox   Grid.Row="3" Grid.Column="3" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompMontoExtra, UpdateSourceTrigger=PropertyChanged}"/>
 
-                                    <TextBlock Grid.Row="3" Text="Horas nocturnas" Style="{StaticResource EtiquetaComp}"/>
-                                    <TextBox   Grid.Row="3" Grid.Column="1" Margin="0,0,0,6" Tag="0"
+                                    <TextBlock Grid.Row="4" Text="Horas nocturnas" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="4" Grid.Column="1" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompHorasNoct, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <TextBox   Grid.Row="3" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                    <TextBox   Grid.Row="4" Grid.Column="3" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompMontoNoct, UpdateSourceTrigger=PropertyChanged}"/>
 
-                                    <TextBlock Grid.Row="4" Text="Horas dobles" Style="{StaticResource EtiquetaComp}"/>
-                                    <TextBox   Grid.Row="4" Grid.Column="1" Margin="0,0,0,6" Tag="0"
+                                    <TextBlock Grid.Row="5" Text="Horas dobles" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="5" Grid.Column="1" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompHorasDobles, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <TextBox   Grid.Row="4" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                    <TextBox   Grid.Row="5" Grid.Column="3" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompMontoDobles, UpdateSourceTrigger=PropertyChanged}"/>
 
-                                    <TextBlock Grid.Row="5" Text="Otros (rebajos en negativo)" Style="{StaticResource EtiquetaComp}"/>
-                                    <TextBox   Grid.Row="5" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                    <TextBlock Grid.Row="6" Text="Otros (rebajos en negativo)" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="6" Grid.Column="3" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompOtros, UpdateSourceTrigger=PropertyChanged}"/>
 
-                                    <TextBlock Grid.Row="6" Text="Viáticos" Style="{StaticResource EtiquetaComp}"/>
-                                    <TextBox   Grid.Row="6" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                    <TextBlock Grid.Row="7" Text="Viáticos" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="7" Grid.Column="3" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompViaticos, UpdateSourceTrigger=PropertyChanged}"/>
 
-                                    <TextBlock Grid.Row="7" Text="C.C.S.S." Style="{StaticResource EtiquetaComp}"/>
-                                    <TextBox   Grid.Row="7" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                    <TextBlock Grid.Row="8" Text="C.C.S.S." Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="8" Grid.Column="3" Margin="0,0,0,6" Tag="0"
                                                Text="{Binding CompDeducciones, UpdateSourceTrigger=PropertyChanged}"/>
 
-                                    <TextBlock Grid.Row="8" Text="Notas" Style="{StaticResource EtiquetaComp}"/>
-                                    <TextBox   Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="3" Tag="N.º de comprobante…"
+                                    <TextBlock Grid.Row="9" Text="Notas" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Tag="N.º de comprobante…"
                                                Text="{Binding CompNotas, UpdateSourceTrigger=PropertyChanged}"/>
                                 </Grid>
 

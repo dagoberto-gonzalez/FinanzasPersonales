@@ -13,6 +13,7 @@ namespace FinanzasPersonales.Models;
 /// </summary>
 public sealed class CalculoPeriodo
 {
+    public const decimal FactorNormal    = 1m;
     public const decimal FactorExtra     = 1.5m;
     public const decimal FactorNocturna  = 1.75m;
     public const decimal FactorDoble     = 2m;
@@ -27,8 +28,10 @@ public sealed class CalculoPeriodo
     public decimal HorasDobles    { get; private init; }
     public decimal MontoDobles    { get; private init; }
 
-    public int     DiasFeriado          { get; private init; }
-    public decimal MontoFeriados        { get; private init; }
+    /// <summary>Horas trabajadas en feriado. La planilla las paga a 1× como "Horas Normales", además
+    /// del salario fijo que ya cubre el día: en total, el feriado sale doble.</summary>
+    public decimal HorasNormales        { get; private init; }
+    public decimal MontoNormales        { get; private init; }
     public decimal HorasAusenciaSinGoce { get; private init; }
     public decimal DescuentoAusencias   { get; private init; }
     public decimal HorasAusenciaConGoce { get; private init; }
@@ -39,8 +42,8 @@ public sealed class CalculoPeriodo
     public decimal Deducciones         { get; private init; }
     public decimal Neto                { get; private init; }
 
-    /// <summary>Feriados menos ausencias: lo que la planilla no trae en una línea propia.</summary>
-    public decimal OtrosAjustes => MontoFeriados - DescuentoAusencias;
+    /// <summary>Las ausencias: la planilla no les dedica una línea propia que se haya visto.</summary>
+    public decimal OtrosAjustes => -DescuentoAusencias;
 
     /// <summary>Tarifa de una hora con recargo, al céntimo, como el "Valor Base" del comprobante.</summary>
     public static decimal Tarifa(decimal valorHora, decimal factor) => Centimos(valorHora * factor);
@@ -55,7 +58,7 @@ public sealed class CalculoPeriodo
         decimal horasExtra = (decimal)regs.Sum(r => r.HorasExtraDiurnas);
         decimal horasNoct  = (decimal)regs.Sum(r => r.HorasExtraNocturnas);
         decimal horasDob   = (decimal)regs.Sum(r => r.HorasDobles);
-        int     feriados   = regs.Count(r => r.EsFeriado && !r.EsAusencia);
+        decimal horasNorm  = (decimal)regs.Sum(r => r.HorasNormales);
         decimal sinGoce    = (decimal)regs.Where(r => !r.TieneGoceSalario).Sum(r => r.HorasAusencia);
         decimal conGoce    = (decimal)regs.Where(r =>  r.TieneGoceSalario).Sum(r => r.HorasAusencia);
 
@@ -63,10 +66,10 @@ public sealed class CalculoPeriodo
         decimal montoExtra = Centimos(horasExtra * Tarifa(hora, FactorExtra));
         decimal montoNoct  = Centimos(horasNoct  * Tarifa(hora, FactorNocturna));
         decimal montoDob   = Centimos(horasDob   * Tarifa(hora, FactorDoble));
-        decimal montoFer   = Centimos(feriados * cfg.HorasDiarias * hora);
+        decimal montoNorm  = Centimos(horasNorm  * Tarifa(hora, FactorNormal));
         decimal descAus    = Centimos(sinGoce * hora);
 
-        decimal bruto = Math.Max(0m, fijo + montoExtra + montoNoct + montoDob + montoFer - descAus);
+        decimal bruto = Math.Max(0m, fijo + montoNorm + montoExtra + montoNoct + montoDob - descAus);
         decimal ded   = Centimos(bruto * cfg.PorcentajeDeduccion / 100m);
 
         return new CalculoPeriodo
@@ -79,8 +82,8 @@ public sealed class CalculoPeriodo
             MontoNocturnas       = montoNoct,
             HorasDobles          = horasDob,
             MontoDobles          = montoDob,
-            DiasFeriado          = feriados,
-            MontoFeriados        = montoFer,
+            HorasNormales        = horasNorm,
+            MontoNormales        = montoNorm,
             HorasAusenciaSinGoce = sinGoce,
             DescuentoAusencias   = descAus,
             HorasAusenciaConGoce = conGoce,

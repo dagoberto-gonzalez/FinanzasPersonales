@@ -9,6 +9,9 @@ public sealed class ComprobantePago
 {
     public int     PeriodoId      { get; set; }
     public decimal SalarioFijo    { get; set; }
+    /// <summary>"Horas Normales": las de un feriado trabajado, a 1×.</summary>
+    public decimal HorasNormales  { get; set; }
+    public decimal MontoNormales  { get; set; }
     public decimal HorasExtra     { get; set; }
     public decimal MontoExtra     { get; set; }
     public decimal HorasNocturnas { get; set; }
@@ -24,7 +27,7 @@ public sealed class ComprobantePago
     public string  Notas          { get; set; } = "";
 
     /// <summary>"Monto Bruto" del comprobante: sin viáticos.</summary>
-    public decimal Bruto => SalarioFijo + MontoExtra + MontoNocturnas + MontoDobles + OtrosAjustes;
+    public decimal Bruto => SalarioFijo + MontoNormales + MontoExtra + MontoNocturnas + MontoDobles + OtrosAjustes;
 
     /// <summary>"Monto Neto" del comprobante: lo que llega a la cuenta.</summary>
     public decimal Neto => Bruto - Deducciones + Viaticos;
@@ -73,12 +76,14 @@ public sealed class LineaComparacion
             : $"{(Diferencia > 0 ? "+" : "−")}₡{Math.Abs(Diferencia):N2}";
 
     /// <summary>
-    /// Arma la comparación en el orden del comprobante. Los feriados y las ausencias no tienen
-    /// línea propia en la planilla, así que van juntos en "Otros ajustes".
+    /// Arma la comparación en el orden del comprobante. Las ausencias no tienen línea propia
+    /// conocida en la planilla, así que van en "Otros ajustes".
     /// </summary>
     public static List<LineaComparacion> Comparar(CalculoPeriodo c, ComprobantePago p, bool pendiente = false) =>
     [
         new() { Concepto = "Salario fijo",    Calculado = c.SalarioFijo,    Pagado = p.SalarioFijo, Pendiente = pendiente },
+        new() { Concepto = "Horas normales",  Calculado = c.MontoNormales,  Pagado = p.MontoNormales, Pendiente = pendiente,
+                HorasCalculadas = c.HorasNormales,  HorasPagadas = p.HorasNormales },
         new() { Concepto = "Horas extra",     Calculado = c.MontoExtra,     Pagado = p.MontoExtra, Pendiente = pendiente,
                 HorasCalculadas = c.HorasExtra,     HorasPagadas = p.HorasExtra },
         new() { Concepto = "Horas nocturnas", Calculado = c.MontoNocturnas, Pagado = p.MontoNocturnas, Pendiente = pendiente,

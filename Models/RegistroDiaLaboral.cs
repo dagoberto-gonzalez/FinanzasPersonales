@@ -5,6 +5,11 @@ public class RegistroDiaLaboral
     public int      Id                  { get; set; }
     public int      UsuarioId           { get; set; }
     public DateTime Fecha               { get; set; }
+    /// <summary>
+    /// Horas trabajadas en un feriado. Se pagan a 1× como "Horas Normales" en la planilla, sobre
+    /// el salario fijo que ya cubre el día. Antes el feriado era una casilla que valía siempre
+    /// la jornada diaria (8,5 h), y el comprobante de agosto de 2026 paga las 9 trabajadas.
+    /// </summary>
     public double   HorasNormales       { get; set; }
     public double   HorasExtraDiurnas   { get; set; }
     public double   HorasExtraNocturnas { get; set; }
@@ -32,7 +37,7 @@ public class RegistroDiaLaboral
                 var goce = TieneGoceSalario ? "c/goce" : "s/goce";
                 return $"Ausencia {HorasAusencia:0.#} h {goce}";
             }
-            if (EsFeriado) return "Feriado";
+            if (HorasNormales > 0) return $"Feriado {HorasNormales:0.#} h";
             return "Normal";
         }
     }

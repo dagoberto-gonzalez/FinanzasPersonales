@@ -134,12 +134,12 @@ public class ControlLaboralViewModel : BaseViewModel
     }
 
     /// <summary>
-    /// Muestra a cuánto sale la hora diaria con lo configurado. Es el número del que dependen
-    /// el valor de un feriado y el de una ausencia, y antes salía de un 6 invisible.
+    /// Muestra a cuánto sale la hora diaria con lo configurado. Es lo que vale una ausencia de
+    /// día completo, y antes salía de un 6 invisible. (Los feriados ya no: se anotan en horas.)
     /// </summary>
     public string HorasDiariasTexto =>
         _cfg.HorasDiarias > 0
-            ? $"Un día son {_cfg.HorasDiarias:0.##} h · es lo que vale un feriado o una ausencia completa"
+            ? $"Un día son {_cfg.HorasDiarias:0.##} h · es lo que descuenta una ausencia de día completo"
             : "";
 
     /// <summary>
@@ -173,7 +173,7 @@ public class ControlLaboralViewModel : BaseViewModel
     private string _regHorasExtraDiurnas   = "0";
     private string _regHorasExtraNocturnas = "0";
     private string _regHorasDobles         = "0";
-    private bool   _regEsFeriado;
+    private string _regHorasFeriado        = "0";
     private bool   _regEsAusencia;
     private bool   _regTieneGoce           = true;
     private string _regError               = "";
@@ -198,10 +198,11 @@ public class ControlLaboralViewModel : BaseViewModel
         get => _regHorasDobles;
         set { _regHorasDobles = value; OnPropertyChanged(); }
     }
-    public bool RegEsFeriado
+    /// <summary>Horas trabajadas en feriado; antes era una casilla que valía la jornada diaria.</summary>
+    public string RegHorasFeriado
     {
-        get => _regEsFeriado;
-        set { _regEsFeriado = value; OnPropertyChanged(); }
+        get => _regHorasFeriado;
+        set { _regHorasFeriado = value; OnPropertyChanged(); }
     }
     public bool RegEsAusencia
     {
@@ -250,7 +251,7 @@ public class ControlLaboralViewModel : BaseViewModel
     public string ResumenExtraD        { get; private set; } = "0 h  →  ₡0";
     public string ResumenExtraN        { get; private set; } = "0 h  →  ₡0";
     public string ResumenDobles        { get; private set; } = "0 h  →  ₡0";
-    public string ResumenFeriados      { get; private set; } = "0 días  →  ₡0";
+    public string ResumenFeriados      { get; private set; } = "0 h  →  ₡0";
     public string ResumenViaticos      { get; private set; } = "₡0";
     public string ResumenDescAusencias { get; private set; } = "0 días  →  ₡0";
     public string ResumenAusenciaGoce  { get; private set; } = "0 días";
@@ -285,6 +286,7 @@ public class ControlLaboralViewModel : BaseViewModel
     private bool                  _compVisible;
     private HistorialLaboralItem? _compTarget;
     private CalculoPeriodo?       _compCalculo;
+    private string _compHorasNormales = "", _compMontoNormales = "";
     private string _compSalarioFijo = "", _compHorasExtra = "", _compMontoExtra = "",
                    _compHorasNoct   = "", _compMontoNoct  = "", _compHorasDobles = "",
                    _compMontoDobles = "", _compOtros      = "", _compViaticos   = "",
@@ -312,6 +314,8 @@ public class ControlLaboralViewModel : BaseViewModel
     }
 
     public string CompSalarioFijo { get => _compSalarioFijo; set => SetComp(ref _compSalarioFijo, value); }
+    public string CompHorasNormales { get => _compHorasNormales; set => SetComp(ref _compHorasNormales, value); }
+    public string CompMontoNormales { get => _compMontoNormales; set => SetComp(ref _compMontoNormales, value); }
     public string CompHorasExtra  { get => _compHorasExtra;  set => SetComp(ref _compHorasExtra,  value); }
     public string CompMontoExtra  { get => _compMontoExtra;  set => SetComp(ref _compMontoExtra,  value); }
     public string CompHorasNoct   { get => _compHorasNoct;   set => SetComp(ref _compHorasNoct,   value); }
@@ -581,7 +585,7 @@ public class ControlLaboralViewModel : BaseViewModel
         ResumenExtraD        = $"{c.HorasExtra:N1} h  →  ₡{c.MontoExtra:N2}";
         ResumenExtraN        = $"{c.HorasNocturnas:N1} h  →  ₡{c.MontoNocturnas:N2}";
         ResumenDobles        = $"{c.HorasDobles:N1} h  →  ₡{c.MontoDobles:N2}";
-        ResumenFeriados      = $"{c.DiasFeriado} día{(c.DiasFeriado == 1 ? "" : "s")}  →  ₡{c.MontoFeriados:N2}";
+        ResumenFeriados      = $"{c.HorasNormales:N1} h  →  ₡{c.MontoNormales:N2}";
         ResumenViaticos      = $"+₡{c.Viaticos:N2}";
         ResumenDescAusencias = $"{c.HorasAusenciaSinGoce:N1} h  →  -₡{c.DescuentoAusencias:N2}";
         ResumenAusenciaGoce  = $"{c.HorasAusenciaConGoce:N1} h";
@@ -795,6 +799,7 @@ public class ControlLaboralViewModel : BaseViewModel
         if (!double.TryParse(_regHorasExtraDiurnas.Replace(",", "."),   NumberStyles.Any, CultureInfo.InvariantCulture, out double hed)) hed = 0;
         if (!double.TryParse(_regHorasExtraNocturnas.Replace(",", "."), NumberStyles.Any, CultureInfo.InvariantCulture, out double hen)) hen = 0;
         if (!double.TryParse(_regHorasDobles.Replace(",", "."),         NumberStyles.Any, CultureInfo.InvariantCulture, out double hd))  hd  = 0;
+        if (!double.TryParse(_regHorasFeriado.Replace(",", "."),        NumberStyles.Any, CultureInfo.InvariantCulture, out double hfe)) hfe = 0;
 
         // La ausencia se mide en horas. Si se marca sin indicar cuántas, se entiende el día
         // completo, que es lo que significaba el booleano anterior.
@@ -810,11 +815,11 @@ public class ControlLaboralViewModel : BaseViewModel
         {
             UsuarioId           = _uid,
             Fecha               = fecha,
-            HorasNormales       = 0,
+            HorasNormales       = Math.Max(0, hfe),
             HorasExtraDiurnas   = Math.Max(0, hed),
             HorasExtraNocturnas = Math.Max(0, hen),
             HorasDobles         = Math.Max(0, hd),
-            EsFeriado           = _regEsFeriado,
+            EsFeriado           = hfe > 0,
             HorasAusencia       = Math.Max(0, horasAusencia),
             TieneGoceSalario    = _regEsAusencia && _regTieneGoce,
             Viaticos            = 0
@@ -826,7 +831,7 @@ public class ControlLaboralViewModel : BaseViewModel
         RegHorasExtraDiurnas   = "0";
         RegHorasExtraNocturnas = "0";
         RegHorasDobles         = "0";
-        RegEsFeriado           = false;
+        RegHorasFeriado        = "0";
         RegEsAusencia          = false;
         RegTieneGoce           = true;
 
@@ -899,6 +904,8 @@ public class ControlLaboralViewModel : BaseViewModel
         string M(decimal v) => c is null ? "" : v.ToString("N2");
         string H(decimal v) => c is null ? "" : v.ToString("0.##");
         _compSalarioFijo = M(c?.SalarioFijo ?? 0);
+        _compHorasNormales = H(c?.HorasNormales ?? 0);
+        _compMontoNormales = M(c?.MontoNormales ?? 0);
         _compHorasExtra  = H(c?.HorasExtra ?? 0);
         _compMontoExtra  = M(c?.MontoExtra ?? 0);
         _compHorasNoct   = H(c?.HorasNocturnas ?? 0);
@@ -909,7 +916,7 @@ public class ControlLaboralViewModel : BaseViewModel
         _compViaticos    = M(c?.Viaticos ?? 0);
         _compDeducciones = M(c?.Deducciones ?? 0);
         _compNotas       = c?.Notas ?? "";
-        foreach (var p in new[] { nameof(CompSalarioFijo), nameof(CompHorasExtra), nameof(CompMontoExtra),
+        foreach (var p in new[] { nameof(CompSalarioFijo), nameof(CompHorasNormales), nameof(CompMontoNormales), nameof(CompHorasExtra), nameof(CompMontoExtra),
                                   nameof(CompHorasNoct), nameof(CompMontoNoct), nameof(CompHorasDobles),
                                   nameof(CompMontoDobles), nameof(CompOtros), nameof(CompViaticos),
                                   nameof(CompDeducciones), nameof(CompNotas), nameof(ComprobanteTitulo) })
@@ -938,6 +945,8 @@ public class ControlLaboralViewModel : BaseViewModel
         {
             PeriodoId      = _compTarget?.SourceId ?? 0,
             SalarioFijo    = Leer(_compSalarioFijo, "salario fijo"),
+            HorasNormales  = Leer(_compHorasNormales, "horas normales"),
+            MontoNormales  = Leer(_compMontoNormales, "monto de horas normales"),
             HorasExtra     = Leer(_compHorasExtra,  "horas extra"),
             MontoExtra     = Leer(_compMontoExtra,  "monto de horas extra"),
             HorasNocturnas = Leer(_compHorasNoct,   "horas nocturnas"),
@@ -959,7 +968,7 @@ public class ControlLaboralViewModel : BaseViewModel
         var comp      = LeerComprobante(invalidos);
 
         // Con todo vacío no hay nada que comparar todavía: sólo se muestra lo calculado.
-        bool pendiente = new[] { _compSalarioFijo, _compHorasExtra, _compMontoExtra, _compHorasNoct,
+        bool pendiente = new[] { _compSalarioFijo, _compHorasNormales, _compMontoNormales, _compHorasExtra, _compMontoExtra, _compHorasNoct,
                                  _compMontoNoct, _compHorasDobles, _compMontoDobles, _compOtros,
                                  _compViaticos, _compDeducciones }.All(string.IsNullOrWhiteSpace);
 

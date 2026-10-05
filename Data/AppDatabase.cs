@@ -2202,6 +2202,26 @@ public class AppDatabase
                 FOREIGN KEY (PeriodoId) REFERENCES PeriodosLaborales(Id) ON DELETE CASCADE
             )
             """);
+
+        // "Horas Normales" del comprobante: las de un feriado trabajado, a 1×. Añadidas después
+        // de crear la tabla, así que también por migración.
+        var cpCols = GetColumnas(conn, "ComprobantesPago");
+        if (!cpCols.Contains("HorasNormales"))
+            AddColumna(conn, "ComprobantesPago", "HorasNormales", "REAL NOT NULL DEFAULT 0");
+        if (!cpCols.Contains("MontoNormales"))
+            AddColumna(conn, "ComprobantesPago", "MontoNormales", "REAL NOT NULL DEFAULT 0");
+
+        // El feriado pasa de casilla a horas (RegistrosDiasLaborales.HorasNormales, que existía y
+        // siempre se guardaba en 0). Un feriado marcado con la casilla valía la jornada diaria
+        // configurada; es lo que se le asigna. Idempotente: una vez con horas, ya no coincide.
+        EjecutarNonQuery(conn, """
+            UPDATE RegistrosDiasLaborales
+            SET HorasNormales = COALESCE((
+                    SELECT c.JornadaSemanal / MAX(c.DiasPorSemana, 1)
+                    FROM ConfiguracionLaboral c
+                    WHERE c.UsuarioId = RegistrosDiasLaborales.UsuarioId), 8)
+            WHERE EsFeriado = 1 AND HorasNormales = 0 AND HorasAusencia = 0
+            """);
     }
 
     public ConfiguracionLaboral ObtenerConfiguracionLaboral(int usuarioId)
@@ -2582,7 +2602,8 @@ public class AppDatabase
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
             SELECT SalarioFijo, HorasExtra, MontoExtra, HorasNocturnas, MontoNocturnas,
-                   HorasDobles, MontoDobles, OtrosAjustes, Viaticos, Deducciones, Notas
+                   HorasDobles, MontoDobles, OtrosAjustes, Viaticos, Deducciones, Notas,
+                   HorasNormales, MontoNormales
             FROM ComprobantesPago WHERE PeriodoId=$id
             """;
         cmd.Parameters.AddWithValue("$id", periodoId);
@@ -2601,7 +2622,9 @@ public class AppDatabase
             OtrosAjustes   = (decimal)r.GetDouble(7),
             Viaticos       = (decimal)r.GetDouble(8),
             Deducciones    = (decimal)r.GetDouble(9),
-            Notas          = r.GetString(10)
+            Notas          = r.GetString(10),
+            HorasNormales  = (decimal)r.GetDouble(11),
+            MontoNormales  = (decimal)r.GetDouble(12)
         };
     }
 
@@ -2610,16 +2633,19 @@ public class AppDatabase
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
-            INSERT INTO ComprobantesPago (PeriodoId, SalarioFijo, HorasExtra, MontoExtra, HorasNocturnas,
-                MontoNocturnas, HorasDobles, MontoDobles, OtrosAjustes, Viaticos, Deducciones, Notas)
-            VALUES ($id, $sf, $he, $me, $hn, $mn, $hd, $md, $oa, $vt, $ded, $notas)
+            INSERT INTO ComprobantesPago (PeriodoId, SalarioFijo, HorasNormales, MontoNormales,
+                HorasExtra, MontoExtra, HorasNocturnas, MontoNocturnas, HorasDobles, MontoDobles,
+                OtrosAjustes, Viaticos, Deducciones, Notas)
+            VALUES ($id, $sf, $hno, $mno, $he, $me, $hn, $mn, $hd, $md, $oa, $vt, $ded, $notas)
             ON CONFLICT(PeriodoId) DO UPDATE SET
-                SalarioFijo=$sf, HorasExtra=$he, MontoExtra=$me, HorasNocturnas=$hn,
+                SalarioFijo=$sf, HorasNormales=$hno, MontoNormales=$mno,
+                HorasExtra=$he, MontoExtra=$me, HorasNocturnas=$hn,
                 MontoNocturnas=$mn, HorasDobles=$hd, MontoDobles=$md, OtrosAjustes=$oa,
                 Viaticos=$vt, Deducciones=$ded, Notas=$notas
             """,
             ("$id", c.PeriodoId),
             ("$sf", (double)c.SalarioFijo),
+            ("$hno", (double)c.HorasNormales), ("$mno", (double)c.MontoNormales),
             ("$he", (double)c.HorasExtra),     ("$me", (double)c.MontoExtra),
             ("$hn", (double)c.HorasNocturnas), ("$mn", (double)c.MontoNocturnas),
             ("$hd", (double)c.HorasDobles),    ("$md", (double)c.MontoDobles),

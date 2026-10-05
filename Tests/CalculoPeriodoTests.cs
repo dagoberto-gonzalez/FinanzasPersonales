@@ -78,6 +78,26 @@ public class CalculoPeriodoTests
         Cerca(251_985.12m, c.Neto);
     }
 
+    /// <summary>
+    /// Comprobante 16151: 1–15 de agosto de 2026. Un feriado trabajado (9 h "Horas Normales" a
+    /// 1×, sobre el salario fijo que ya cubre el día) y un domingo (11 h dobles).
+    /// </summary>
+    [Fact]
+    public void ReproduceElComprobanteDeAgostoConFeriado()
+    {
+        var c = CalculoPeriodo.De(Config(25_000m),
+        [
+            new RegistroDiaLaboral { Fecha = new DateTime(2026, 8, 2), HorasNormales = 9 },
+            new RegistroDiaLaboral { Fecha = new DateTime(2026, 8, 9), HorasDobles   = 11 }
+        ]);
+
+        Assert.Equal(16_133.67m, c.MontoNormales);
+        Cerca(39_437.86m,  c.MontoDobles);
+        Cerca(270_686.90m, c.Bruto);
+        Cerca(29_315.39m,  c.Deducciones);
+        Cerca(266_371.51m, c.Neto);
+    }
+
     [Fact]
     public void LosViaticosNoPaganDeduccion()
     {

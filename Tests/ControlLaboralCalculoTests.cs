@@ -96,24 +96,43 @@ public class ControlLaboralCalculoTests
     // ── El divisor de días ──
 
     /// <summary>
-    /// Con el 6 clavado, la hora diaria salía 7,08 en vez de 8,5 y cada feriado se pagaba unos
-    /// ₡3.300 por debajo.
+    /// Un feriado se paga por las horas trabajadas, a 1×, sobre el salario fijo. Antes era una
+    /// casilla que valía la jornada diaria —con el 6 clavado, 7,08 h; luego 8,5 h— y el
+    /// comprobante de agosto de 2026 paga las 9 horas trabajadas.
     /// </summary>
     [Fact]
-    public void UnFeriadoSePagaSegunLosDiasQueSeTrabajan()
+    public void UnFeriadoSePagaPorLasHorasTrabajadas()
     {
         using var t  = new BaseDePrueba();
         var       vm = Abrir(t);
 
+        vm.RegFecha        = DiaDelPeriodoActual(t).ToString("dd/MM/yyyy");
+        vm.RegHorasFeriado = "9";
+        vm.AgregarRegistroCommand.Execute(null);
+
+        // 9 h × ₡1.792,63 = ₡16.133,67, la línea "Horas Normales" del comprobante 16151.
+        Assert.Contains("16.133,67", vm.ResumenFeriados);
+        Assert.Equal("Feriado 9 h", vm.Registros.Single().TipoDisplay);
+    }
+
+    /// <summary>
+    /// Los feriados marcados con la casilla vieja no tenían horas: se migran a la jornada
+    /// diaria, que es lo que valían.
+    /// </summary>
+    [Fact]
+    public void UnFeriadoDeLaCasillaViejaSeMigraAHoras()
+    {
+        using var t = new BaseDePrueba();
+        Abrir(t);
         t.Db.InsertarOActualizarRegistroDia(new RegistroDiaLaboral
         {
             UsuarioId = t.UsuarioId, Fecha = DiaDelPeriodoActual(t), EsFeriado = true
         });
-        vm.Cargar();
 
-        // 8,5 h × ₡1.792,63 = ₡15.237,36. Con el divisor viejo (/6) daba 7,08 h.
-        Assert.Contains("15.237", vm.ResumenFeriados);
-        Assert.DoesNotContain("12.69", vm.ResumenFeriados);
+        var db  = new FinanzasPersonales.Data.AppDatabase(t.Ruta);   // vuelve a migrar
+        var reg = db.ObtenerRegistrosDia(t.UsuarioId, DiaDelPeriodoActual(t), DiaDelPeriodoActual(t)).Single();
+
+        Assert.Equal(8.5, reg.HorasNormales);   // 42,5 h / 5 días
     }
 
     // ── Ausencias por horas ──
