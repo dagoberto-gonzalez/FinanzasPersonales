@@ -13,7 +13,7 @@ public class PeriodoLaboralTests
     /// <summary>La configuración real de Dagoberto: quincenal, cortes el 14 y el 28.</summary>
     private static ConfiguracionLaboral Quincenal() => new()
     {
-        SalarioPorHora = 2336m,
+        SalarioMensual = 430_230.76m,
         JornadaSemanal = 42.5m,
         DiasPorSemana  = 5,
         ModoPago       = "Quincenal",
@@ -110,7 +110,7 @@ public class PeriodoLaboralTests
     {
         var cfg = new ConfiguracionLaboral
         {
-            SalarioPorHora = 2000m, JornadaSemanal = 48m,
+            SalarioMensual = 480_000m, JornadaSemanal = 48m,
             ModoPago = "Mensual", DiaPago = 30
         };
 
@@ -124,7 +124,7 @@ public class PeriodoLaboralTests
     {
         var cfg = new ConfiguracionLaboral
         {
-            SalarioPorHora = 2000m, JornadaSemanal = 48m,
+            SalarioMensual = 480_000m, JornadaSemanal = 48m,
             ModoPago = "Semanal", DiaSemana = 5   // viernes
         };
 
@@ -132,27 +132,6 @@ public class PeriodoLaboralTests
 
         Assert.Equal(DayOfWeek.Friday, fin.DayOfWeek);
         Assert.Equal(6, (fin - inicio).TotalDays);
-    }
-
-    // ── El salario base es proporcional al período ──
-
-    /// <summary>
-    /// Antes la base era una constante por modo de pago y las horas se sumaban del mes entero:
-    /// en quincenal salía la base de quince días con las extras de treinta.
-    /// </summary>
-    [Fact]
-    public void LaBaseEsProporcionalALosDiasDelPeriodo()
-    {
-        var cfg = Quincenal();
-
-        // 15 al 28 son catorce días; 29 al 14, dieciséis o diecisiete según el mes.
-        var corta = cfg.SalarioBaseDe(new DateTime(2026, 9, 15), new DateTime(2026, 9, 28));
-        var larga = cfg.SalarioBaseDe(new DateTime(2026, 9, 29), new DateTime(2026, 10, 14));
-
-        Assert.True(larga > corta, "Un período más largo tiene que pagar más base.");
-
-        // 14 días = exactamente dos semanas de jornada.
-        Assert.Equal(Math.Round(2336m * 42.5m * 2m, 0), corta);
     }
 
     [Fact]

@@ -3,7 +3,28 @@ namespace FinanzasPersonales.Models;
 public class ConfiguracionLaboral
 {
     public int     UsuarioId      { get; set; }
-    public decimal SalarioPorHora { get; set; }
+
+    /// <summary>
+    /// Salario mensual: el dato que figura en la planilla. Todo lo demás sale de él.
+    /// <para>
+    /// Antes se configuraba el salario por hora y la base se calculaba como hora × jornada × días.
+    /// La planilla no funciona así: paga medio mensual por quincena sin importar cuántos días
+    /// tenga, y valora la hora como mensual ÷ 240. Con una jornada de 42,5 h la hora "lógica"
+    /// salía un 30 % más alta que la que se paga, y con ella cada hora extra calculada.
+    /// </para>
+    /// </summary>
+    public decimal SalarioMensual { get; set; }
+
+    /// <summary>
+    /// Divisor legal de la hora: 30 días × 8 horas. Es el que aplica la planilla (comprobantes de
+    /// marzo y setiembre de 2026: ₡430.230,76 ÷ 240 = ₡1.792,63, el "Valor Base" de las horas
+    /// dobles es exactamente el doble), no la jornada que se trabaje de verdad.
+    /// </summary>
+    public const decimal HorasPorMes = 240m;
+
+    /// <summary>Valor de la hora ordinaria, redondeado al céntimo como en la planilla.</summary>
+    public decimal SalarioPorHora => Math.Round(SalarioMensual / HorasPorMes, 2, MidpointRounding.AwayFromZero);
+
     public decimal JornadaSemanal { get; set; } = 48m;
     public string  ModoPago       { get; set; } = "Mensual"; // "Mensual", "Quincenal", "Semanal"
     public int     DiaPago        { get; set; } = 15;
@@ -93,13 +114,16 @@ public class ConfiguracionLaboral
         PeriodoQueContiene(finActual.AddDays(1));
 
     /// <summary>
-    /// Salario base del período, proporcional a su duración. Antes era una constante por modo de
-    /// pago, lo que en quincenal sumaba la base de quince días con las horas extra de treinta.
+    /// Salario fijo de un período. Es una fracción fija del mensual —la mitad en quincenal— y no
+    /// depende de cuántos días tenga el período: la planilla paga ₡215.115,38 tanto del 16 al 30
+    /// de setiembre como del 16 al 31 de marzo. Prorratearlo por días daba una base distinta
+    /// para cada quincena y ninguna coincidía con lo pagado.
     /// </summary>
-    public decimal SalarioBaseDe(DateTime inicio, DateTime fin)
+    public decimal SalarioFijoPorPeriodo => ModoPago switch
     {
-        if (SalarioPorHora <= 0 || JornadaSemanal <= 0) return 0m;
-        var dias = (decimal)(fin.Date - inicio.Date).TotalDays + 1m;
-        return Math.Round(SalarioPorHora * JornadaSemanal * dias / 7m, 0);
-    }
+        "Quincenal" => Math.Round(SalarioMensual / 2m, 2, MidpointRounding.AwayFromZero),
+        // Semana de 7 días a salario diario (mensual ÷ 30), la misma base de 30 días que la hora.
+        "Semanal"   => Math.Round(SalarioMensual / 30m * 7m, 2, MidpointRounding.AwayFromZero),
+        _           => SalarioMensual
+    };
 }

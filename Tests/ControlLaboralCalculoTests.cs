@@ -12,7 +12,7 @@ namespace FinanzasPersonales.Tests;
 [Collection("Sesion")]
 public class ControlLaboralCalculoTests
 {
-    private const decimal SalHora = 2336m;
+    private const decimal SalMensual = 430_230.76m;   // hora = ₡1.792,63
 
     private static ControlLaboralViewModel Abrir(BaseDePrueba t, decimal viaticos = 0m,
                                                  Func<DateTime>? reloj = null)
@@ -21,7 +21,7 @@ public class ControlLaboralCalculoTests
         t.Db.GuardarConfiguracionLaboral(new ConfiguracionLaboral
         {
             UsuarioId           = t.UsuarioId,
-            SalarioPorHora      = SalHora,
+            SalarioMensual      = SalMensual,
             JornadaSemanal      = 42.5m,
             DiasPorSemana       = 5,
             PorcentajeDeduccion = 10.83m,
@@ -55,7 +55,7 @@ public class ControlLaboralCalculoTests
         SessionService.IniciarSesion(t.UsuarioId, "tester", "Normal");
         t.Db.GuardarConfiguracionLaboral(new ConfiguracionLaboral
         {
-            UsuarioId = t.UsuarioId, SalarioPorHora = SalHora, JornadaSemanal = 42.5m,
+            UsuarioId = t.UsuarioId, SalarioMensual = SalMensual, JornadaSemanal = 42.5m,
             DiasPorSemana = 5, PorcentajeDeduccion = 10.83m,
             ModoPago = "Quincenal", DiaPago = 14, DiaPago2 = 28
         });
@@ -88,8 +88,9 @@ public class ControlLaboralCalculoTests
         vm.Cargar();
 
         Assert.Single(vm.Registros);
-        // 8 h × 2336 × 1,5 = 28.032
-        Assert.Contains("28.032", vm.ResumenExtraD);
+        // 8 h × ₡2.688,95 (el "Valor Base" del comprobante) = ₡21.511,60. Con la hora sacada de
+        // la jornada (₡2.336) daba ₡28.032: un 30 % más de lo que paga la planilla.
+        Assert.Contains("21.511,6", vm.ResumenExtraD);
     }
 
     // ── El divisor de días ──
@@ -110,9 +111,9 @@ public class ControlLaboralCalculoTests
         });
         vm.Cargar();
 
-        // 8,5 h × 2336 = 19.856. Con el divisor viejo daba 16.547.
-        Assert.Contains("19.856", vm.ResumenFeriados);
-        Assert.DoesNotContain("16.547", vm.ResumenFeriados);
+        // 8,5 h × ₡1.792,63 = ₡15.237,36. Con el divisor viejo (/6) daba 7,08 h.
+        Assert.Contains("15.237", vm.ResumenFeriados);
+        Assert.DoesNotContain("12.69", vm.ResumenFeriados);
     }
 
     // ── Ausencias por horas ──
@@ -129,8 +130,8 @@ public class ControlLaboralCalculoTests
         });
         vm.Cargar();
 
-        // 3 h × 2336 = 7.008. Antes sólo existía el día completo.
-        Assert.Contains("7.008", vm.ResumenDescAusencias);
+        // 3 h × ₡1.792,63 = ₡5.377,89. Antes sólo existía el día completo.
+        Assert.Contains("5.377", vm.ResumenDescAusencias);
         Assert.Contains("3", vm.ResumenDescAusencias);
     }
 
@@ -287,8 +288,8 @@ public class ControlLaboralCalculoTests
         var primera = cfg.PeriodoQueContiene(new DateTime(2026, 9, 20));   // 15–28 set
         var segunda = cfg.PeriodoSiguiente(primera.Fin);                   // 29 set–14 oct
 
-        t.Db.ConsolidarPeriodoLaboral(t.UsuarioId, primera.Inicio, primera.Fin, 200000, 21660, 178340);
-        t.Db.ConsolidarPeriodoLaboral(t.UsuarioId, segunda.Inicio, segunda.Fin, 240000, 25992, 214008);
+        t.Db.ConsolidarPeriodoLaboral(t.UsuarioId, primera.Inicio, primera.Fin);
+        t.Db.ConsolidarPeriodoLaboral(t.UsuarioId, segunda.Inicio, segunda.Fin);
 
         // Con la clave (Anio, Mes) la segunda sobrescribía a la primera: el modo Quincenal
         // que ofrecía la interfaz no se podía representar en la tabla.
@@ -307,7 +308,7 @@ public class ControlLaboralCalculoTests
         Abrir(t);
 
         t.Db.ConsolidarPeriodoLaboral(t.UsuarioId,
-            new DateTime(2026, 9, 15), new DateTime(2026, 9, 28), 200000, 21660, 178340);
+            new DateTime(2026, 9, 15), new DateTime(2026, 9, 28));
 
         var p = t.Db.ObtenerPeriodosLaborales(t.UsuarioId).Single();
         Assert.Equal(new DateTime(2026, 9, 15), p.FechaInicio);

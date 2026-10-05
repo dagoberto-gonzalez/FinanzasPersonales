@@ -93,7 +93,7 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 - `GastosFijos` / `IngresosFijos (Id, UsuarioId, Nombre, Monto, Dia*Vencimiento|Ingreso, Dia*2, Activo)`
 - `PagosMensuales (Id, UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado, MetodoPago, TransaccionId)` — tracks per-month payment of a GastoFijo/IngresoFijo, UNIQUE(UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia)
 - `Categorias (Id, UsuarioId, Nombre)` — UsuarioId=NULL means global (all users see it), UNIQUE(UsuarioId, Nombre)
-- **Control Laboral (hourly-wage timesheet module):** `ConfiguracionLaboral (UsuarioId PK, SalarioPorHora, JornadaSemanal, DiasPorSemana, PorcentajeDeduccion, ModoPago, DiaPago…)`, `RegistrosDiasLaborales (UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas/Nocturnas, HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario…)` — UNIQUE(UsuarioId, Fecha), `PeriodosLaborales (UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId)` — UNIQUE(UsuarioId, FechaInicio). A period is a **date range**, not a month: the base salary and the hours must come from the same range (`ConfiguracionLaboral.PeriodoQueContiene`), which the old `(Anio, Mes)` key made impossible for two fortnights in one month, `IngresoLaboralDirecto`, `ResumenMensual (UsuarioId, Anio, Mes, Ingresos, Gastos, Balance, BalanceAcumulado, NumTransacciones, FechaCierre…)` — one row per closed month, insert is idempotent (`INSERT OR IGNORE`)
+- **Control Laboral (hourly-wage timesheet module):** `ConfiguracionLaboral (UsuarioId PK, SalarioMensual, JornadaSemanal, DiasPorSemana, PorcentajeDeduccion, ModoPago, DiaPago, Viaticos…)` — the **monthly salary is the input**; the hourly rate is derived as `mensual ÷ 240` (the payroll's legal divisor, not the worked week) and the `SalarioPorHora` column is only written for consistency, never read, `RegistrosDiasLaborales (UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas/Nocturnas, HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario…)` — UNIQUE(UsuarioId, Fecha), `PeriodosLaborales (UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId, SalarioMensual, PorcentajeDeduccion, Viaticos)` — UNIQUE(UsuarioId, FechaInicio). A period is a **date range**, not a month: the hours must come from the same range (`ConfiguracionLaboral.PeriodoQueContiene`), which the old `(Anio, Mes)` key made impossible for two fortnights in one month. The last three columns are the parameters **frozen at close**, so a later raise does not rewrite periods already paid (NULL on rows closed before they existed), `ComprobantesPago (PeriodoId PK → PeriodosLaborales ON DELETE CASCADE, SalarioFijo, Horas/Monto Extra·Nocturnas·Dobles, OtrosAjustes, Viaticos, Deducciones, Notas)` — what the payslip says, stored apart from what was calculated, `IngresoLaboralDirecto`, `ResumenMensual (UsuarioId, Anio, Mes, Ingresos, Gastos, Balance, BalanceAcumulado, NumTransacciones, FechaCierre…)` — one row per closed month, insert is idempotent (`INSERT OR IGNORE`)
 
 ### The two axes (decision D2)
 
@@ -206,6 +206,23 @@ These are enforced in `AppDatabase` (not just in the UI), so breaking them fails
   (it would be `1.200,00` or `1,200.00`), and silently picking a reading is how a wrong figure
   ends up recorded. A number may not use the same character for grouping and for decimals, and
   thousands groups must be three digits.
+
+## Control Laboral: calculated vs paid
+
+`Models/CalculoPeriodo` is the one pure calculation used by the summary, the close and the
+payslip comparison. It mirrors the employer's payroll line by line, as reconstructed from two
+real payslips (`CalculoPeriodoTests` reproduces both to the cent): fixed salary = a fixed fraction
+of the monthly (half per fortnight, **not** prorated by days); rate = hour × factor rounded to the
+cent, total = hours × rate; **bruto excludes viáticos**, the deduction applies to bruto, and
+viáticos are added to the net. The payroll rounds inconsistently, so comparisons tolerate < ₡1
+(`LineaComparacion.Tolerancia`).
+
+- `ConsolidarPeriodoLaboral(uid, ini, fin)` computes from the stored records itself and freezes
+  the parameters; it takes no figures from the caller.
+- **Never overwrite calculated figures with paid ones.** The old "Editar cierre" did exactly
+  that and left nothing to compare against; it was replaced by the payslip form.
+- The payslip form starts empty on purpose: pre-filling it with the calculated values would hide
+  every difference.
 
 ## Integrity verification
 

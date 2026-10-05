@@ -9,7 +9,6 @@ namespace FinanzasPersonales.ViewModels;
 
 public class ControlLaboralViewModel : BaseViewModel
 {
-    private const double TasaCCSS = 0.1067;
     private static readonly CultureInfo CrCulture =
         CultureInfo.GetCultureInfo("es-CR");
 
@@ -55,7 +54,7 @@ public class ControlLaboralViewModel : BaseViewModel
         EsPeriodoActual ? Visibility.Collapsed : Visibility.Visible;
 
     // ── Configuración — campos internos ──────────────────────────────────────
-    private decimal _salXHora;
+    private decimal _salarioMensual;
     private decimal _jornadaSemanal;
     private string  _modoPago  = "Mensual";
     private int     _diaPago;
@@ -64,7 +63,7 @@ public class ControlLaboralViewModel : BaseViewModel
     private decimal _viaticos;
 
     // ── Configuración — propiedades de UI ────────────────────────────────────
-    private string _cfgSalarioXHora = "";
+    private string _cfgSalarioMensual = "";
     private string _cfgJornada      = "48";
     private string _cfgModoPago     = "Mensual";
     private string _cfgDiaPago      = "15";
@@ -74,10 +73,10 @@ public class ControlLaboralViewModel : BaseViewModel
     private string _cfgMensaje      = "";
     private bool   _cfgMensajeOk;
 
-    public string ConfigSalarioXHora
+    public string ConfigSalarioMensual
     {
-        get => _cfgSalarioXHora;
-        set { _cfgSalarioXHora = value; OnPropertyChanged(); }
+        get => _cfgSalarioMensual;
+        set { _cfgSalarioMensual = value; OnPropertyChanged(); }
     }
     public string ConfigJornada
     {
@@ -141,6 +140,15 @@ public class ControlLaboralViewModel : BaseViewModel
     public string HorasDiariasTexto =>
         _cfg.HorasDiarias > 0
             ? $"Un día son {_cfg.HorasDiarias:0.##} h · es lo que vale un feriado o una ausencia completa"
+            : "";
+
+    /// <summary>
+    /// La hora como la valora la planilla, para compararla con el "Valor Base" del comprobante:
+    /// las horas extra salen a 1,5 veces esto y las dobles al doble.
+    /// </summary>
+    public string ValorHoraTexto =>
+        _cfg.SalarioMensual > 0
+            ? $"Hora: ₡{_cfg.SalarioPorHora:N2} (mensual ÷ 240) · extra ₡{CalculoPeriodo.Tarifa(_cfg.SalarioPorHora, CalculoPeriodo.FactorExtra):N2} · doble ₡{CalculoPeriodo.Tarifa(_cfg.SalarioPorHora, CalculoPeriodo.FactorDoble):N2}"
             : "";
     public string ConfigMensaje
     {
@@ -271,53 +279,60 @@ public class ControlLaboralViewModel : BaseViewModel
     // ── Propiedades públicas para pre-llenar la ventana modal ────────────────
     public decimal SalarioNetoCalculado => _salarioNetoCalc;
 
-    // ── Formulario: Editar cierre ─────────────────────────────────────────────
-    private bool             _editFormVisible;
-    private HistorialLaboralItem? _editTarget;
-    private string           _editBruto       = "";
-    private string           _editDeducciones = "";
-    private string           _editNeto        = "";
-    private string           _editNotas       = "";
-    private string           _editError       = "";
+    // ── Formulario: Comprobante de pago ───────────────────────────────────────
+    // Sustituye a "Editar cierre", que sobrescribía lo calculado con lo pagado y dejaba sin nada
+    // con qué comparar. Lo calculado no se toca; el comprobante se guarda aparte.
+    private bool                  _compVisible;
+    private HistorialLaboralItem? _compTarget;
+    private CalculoPeriodo?       _compCalculo;
+    private string _compSalarioFijo = "", _compHorasExtra = "", _compMontoExtra = "",
+                   _compHorasNoct   = "", _compMontoNoct  = "", _compHorasDobles = "",
+                   _compMontoDobles = "", _compOtros      = "", _compViaticos   = "",
+                   _compDeducciones = "", _compNotas      = "", _compError      = "";
 
-    public bool EditFormVisible
+    public bool ComprobanteVisible
     {
-        get => _editFormVisible;
-        set { _editFormVisible = value; OnPropertyChanged(); OnPropertyChanged(nameof(EditFormVisibility)); }
+        get => _compVisible;
+        set { _compVisible = value; OnPropertyChanged(); OnPropertyChanged(nameof(ComprobanteVisibility)); }
     }
-    public Visibility EditFormVisibility =>
-        _editFormVisible ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ComprobanteVisibility =>
+        _compVisible ? Visibility.Visible : Visibility.Collapsed;
 
-    public string EditBruto
-    {
-        get => _editBruto;
-        set { _editBruto = value; OnPropertyChanged(); }
-    }
-    public string EditDeducciones
-    {
-        get => _editDeducciones;
-        set { _editDeducciones = value; OnPropertyChanged(); }
-    }
-    public string EditNeto
-    {
-        get => _editNeto;
-        set { _editNeto = value; OnPropertyChanged(); }
-    }
-    public string EditNotas
-    {
-        get => _editNotas;
-        set { _editNotas = value; OnPropertyChanged(); }
-    }
-    public string EditError
-    {
-        get => _editError;
-        set { _editError = value; OnPropertyChanged(); OnPropertyChanged(nameof(EditErrorVisibility)); }
-    }
-    public Visibility EditErrorVisibility =>
-        string.IsNullOrEmpty(_editError) ? Visibility.Collapsed : Visibility.Visible;
+    public string ComprobanteTitulo =>
+        _compTarget is not null ? $"Comprobante de pago · {_compTarget.Label}" : "Comprobante de pago";
 
-    public string EditTituloLabel =>
-        _editTarget is not null ? $"Editando: {_editTarget.Label}" : "Editar cierre";
+    /// <summary>La comparación se rehace con cada tecla: se ve qué cuadra mientras se copia.</summary>
+    public ObservableCollection<LineaComparacion> Comparacion { get; } = [];
+
+    private void SetComp(ref string campo, string value, [System.Runtime.CompilerServices.CallerMemberName] string? prop = null)
+    {
+        campo = value;
+        OnPropertyChanged(prop);
+        RecalcularComparacion();
+    }
+
+    public string CompSalarioFijo { get => _compSalarioFijo; set => SetComp(ref _compSalarioFijo, value); }
+    public string CompHorasExtra  { get => _compHorasExtra;  set => SetComp(ref _compHorasExtra,  value); }
+    public string CompMontoExtra  { get => _compMontoExtra;  set => SetComp(ref _compMontoExtra,  value); }
+    public string CompHorasNoct   { get => _compHorasNoct;   set => SetComp(ref _compHorasNoct,   value); }
+    public string CompMontoNoct   { get => _compMontoNoct;   set => SetComp(ref _compMontoNoct,   value); }
+    public string CompHorasDobles { get => _compHorasDobles; set => SetComp(ref _compHorasDobles, value); }
+    public string CompMontoDobles { get => _compMontoDobles; set => SetComp(ref _compMontoDobles, value); }
+    public string CompOtros       { get => _compOtros;       set => SetComp(ref _compOtros,       value); }
+    public string CompViaticos    { get => _compViaticos;    set => SetComp(ref _compViaticos,    value); }
+    public string CompDeducciones { get => _compDeducciones; set => SetComp(ref _compDeducciones, value); }
+    public string CompNotas
+    {
+        get => _compNotas;
+        set { _compNotas = value; OnPropertyChanged(); }
+    }
+    public string CompError
+    {
+        get => _compError;
+        set { _compError = value; OnPropertyChanged(); OnPropertyChanged(nameof(CompErrorVisibility)); }
+    }
+    public Visibility CompErrorVisibility =>
+        string.IsNullOrEmpty(_compError) ? Visibility.Collapsed : Visibility.Visible;
 
     // ── Commands ──────────────────────────────────────────────────────────────
     public RelayCommand GuardarConfigCommand   { get; }
@@ -331,10 +346,11 @@ public class ControlLaboralViewModel : BaseViewModel
     public RelayCommand PeriodoSiguienteCommand { get; }
     public RelayCommand PeriodoActualCommand    { get; }
 
-    // Historial — editar cierre
-    public RelayCommand<HistorialLaboralItem> EditarCierreCommand   { get; }
-    public RelayCommand                       GuardarEdicionCommand  { get; }
-    public RelayCommand                       CancelarEdicionCommand { get; }
+    // Historial — comprobante de pago
+    public RelayCommand<HistorialLaboralItem> AbrirComprobanteCommand   { get; }
+    public RelayCommand                       GuardarComprobanteCommand { get; }
+    public RelayCommand                       CerrarComprobanteCommand  { get; }
+    public RelayCommand                       BorrarComprobanteCommand  { get; }
 
     // Historial — eliminar
     public RelayCommand<HistorialLaboralItem> EliminarHistorialItemCommand { get; }
@@ -356,14 +372,10 @@ public class ControlLaboralViewModel : BaseViewModel
         CerrarPeriodoCommand = new RelayCommand(CerrarPeriodo);
         ExportarPdfCommand   = new RelayCommand(ExportarPdf);
 
-        EditarCierreCommand   = new RelayCommand<HistorialLaboralItem>(AbrirEdicion);
-        GuardarEdicionCommand  = new RelayCommand(GuardarEdicion);
-        CancelarEdicionCommand = new RelayCommand(() =>
-        {
-            EditFormVisible = false;
-            EditError = "";
-            _editTarget = null;
-        });
+        AbrirComprobanteCommand   = new RelayCommand<HistorialLaboralItem>(AbrirComprobante);
+        GuardarComprobanteCommand = new RelayCommand(GuardarComprobante);
+        CerrarComprobanteCommand  = new RelayCommand(CerrarComprobante);
+        BorrarComprobanteCommand  = new RelayCommand(BorrarComprobante);
 
         EliminarHistorialItemCommand = new RelayCommand<HistorialLaboralItem>(EliminarHistorialItem);
 
@@ -398,12 +410,13 @@ public class ControlLaboralViewModel : BaseViewModel
         // al período actual nunca aparecía al navegar.
         OnPropertyChanged(nameof(VolverAlActualVisibility));
         OnPropertyChanged(nameof(HorasDiariasTexto));
+        OnPropertyChanged(nameof(ValorHoraTexto));
     }
 
     public void Cargar()
     {
         _cfg = _db.ObtenerConfiguracionLaboral(_uid);
-        _salXHora       = _cfg.SalarioPorHora;
+        _salarioMensual = _cfg.SalarioMensual;
         _jornadaSemanal = _cfg.JornadaSemanal;
         _modoPago       = _cfg.ModoPago;
         _diaPago        = _cfg.DiaPago;
@@ -411,13 +424,13 @@ public class ControlLaboralViewModel : BaseViewModel
         _diaSemana      = _cfg.DiaSemana;
         _viaticos       = _cfg.Viaticos;
 
-        ConfigSalarioXHora = _salXHora.ToString("F0");
+        ConfigSalarioMensual = _salarioMensual.ToString("N2");
         ConfigJornada      = _jornadaSemanal.ToString("G", CultureInfo.InvariantCulture);
         ConfigModoPago     = _modoPago;
         ConfigDiaPago      = _diaPago  > 0 ? _diaPago.ToString()  : "15";
         ConfigDiaPago2     = _diaPago2 > 0 ? _diaPago2.ToString() : "30";
         ConfigDiaSemana    = DiaSemanaToString(_diaSemana);
-        ConfigViaticos     = _viaticos.ToString("F0");
+        ConfigViaticos     = _viaticos.ToString("N0");
         ConfigDiasPorSemana = _cfg.DiasPorSemana.ToString();
         ConfigPorcentaje    = _cfg.PorcentajeDeduccion.ToString("0.##", CultureInfo.InvariantCulture);
 
@@ -461,6 +474,7 @@ public class ControlLaboralViewModel : BaseViewModel
             items.Add(new HistorialLaboralItem
             {
                 EsCierre      = true,
+                Comprobante   = EstadoComprobante(p),
                 Fecha         = p.FechaFin,
                 Label         = p.Label,
                 Bruto         = p.SalarioBruto,
@@ -518,77 +532,72 @@ public class ControlLaboralViewModel : BaseViewModel
         OnPropertyChanged(nameof(ConHistorialVisibility));
     }
 
+    /// <summary>Para la columna del historial: sin anotar, cuadra, o cuánto difiere el neto.</summary>
+    private string EstadoComprobante(PeriodoLaboral p)
+    {
+        var comp = _db.ObtenerComprobante(p.Id);
+        if (comp is null) return "Sin anotar";
+
+        var lineas = LineaComparacion.Comparar(CalculoDe(p), comp);
+        if (lineas.All(l => l.Cuadra)) return "✓ Cuadra";
+
+        var neto = lineas.Single(l => l.Concepto == "Monto neto");
+        return Math.Abs(neto.Diferencia) < LineaComparacion.Tolerancia
+            ? "⚠ Horas distintas"
+            : $"⚠ {neto.DiferenciaTexto}";
+    }
+
     private void ActualizarResumen()
     {
-        // La base se calcula sobre los MISMOS días que se suman abajo. Antes era una constante
-        // por modo de pago —en quincenal, la base de quince días— mientras las horas extra se
-        // sumaban del mes entero.
-        decimal periodoBase = _cfg.SalarioBaseDe(_inicio, _fin);
-        ResumenSalarioBase = _salXHora > 0 ? $"₡{periodoBase:N0}" : "Configura el salario";
-        OnPropertyChanged(nameof(ResumenSalarioBase));
+        // Un período cerrado se calcula con los parámetros que tenía al cerrarse: si después
+        // suben los viáticos o el salario, lo ya pagado no debe cambiar.
+        var periodos = _db.ObtenerPeriodosLaborales(_uid);
+        var actual   = periodos.FirstOrDefault(p => p.FechaInicio.Date == _inicio.Date);
+        var cfg      = actual?.Cerrado == true ? actual.ConfiguracionAlCierre(_cfg) : _cfg;
 
-        if (_salXHora <= 0)
+        if (cfg.SalarioMensual <= 0)
         {
+            ResumenSalarioBase   = "Configura el salario";
             ResumenSalarioBruto  = "—";
             ResumenDeduccionCCSS = "—";
             ResumenSalarioNeto   = "—";
+            OnPropertyChanged(nameof(ResumenSalarioBase));
             NotifyResumen();
+            ActualizarEstadoPeriodo(actual);
             return;
         }
 
-        // Sale de los días que se trabajan, no de un 6 clavado: con semana de 5 días el valor
-        // de la hora diaria salía un 20 % bajo, y con él cada feriado y cada ausencia.
-        decimal horasDiarias = _cfg.HorasDiarias;
+        // El mismo cálculo que el cierre y que la comparación con el comprobante.
+        var c = CalculoPeriodo.De(cfg, Registros);
 
-        double totalExtraD  = Registros.Sum(r => r.HorasExtraDiurnas);
-        double totalExtraN  = Registros.Sum(r => r.HorasExtraNocturnas);
-        double totalDobles  = Registros.Sum(r => r.HorasDobles);
-        int    feriadosDias = Registros.Count(r => r.EsFeriado && !r.EsAusencia);
+        decimal aguinaldo  = Math.Round(c.Bruto / 12m, 0);
+        decimal vacaciones = Math.Round(c.Bruto / 12m * (10m / 22m), 0);
 
-        // La ausencia se mide en horas: faltar tres horas no se podía registrar.
-        double horasSinGoce = Registros.Where(r => !r.TieneGoceSalario).Sum(r => r.HorasAusencia);
-        double horasConGoce = Registros.Where(r =>  r.TieneGoceSalario).Sum(r => r.HorasAusencia);
+        _salarioBrutoCalc = c.Bruto;
+        _deduccionesCalc  = c.Deducciones;
+        _salarioNetoCalc  = c.Neto;
 
-        decimal montoExtraD   = Math.Round((decimal)totalExtraD * _salXHora * 1.5m,  0);
-        decimal montoExtraN   = Math.Round((decimal)totalExtraN * _salXHora * 1.75m, 0);
-        decimal montoDobles   = Math.Round((decimal)totalDobles * _salXHora * 2m,    0);
-        decimal montoFeriados = Math.Round(feriadosDias * horasDiarias * _salXHora, 0);
-        decimal descAusencias = Math.Round((decimal)horasSinGoce * _salXHora, 0);
-
-        decimal salarioBruto = periodoBase
-            + montoExtraD + montoExtraN + montoDobles
-            + montoFeriados + _viaticos
-            - descAusencias;
-        if (salarioBruto < 0) salarioBruto = 0;
-
-        // Porcentaje configurable: estaba clavado como 10,67 % y cambia por ley.
-        decimal deduccionCCSS = Math.Round(salarioBruto * _cfg.PorcentajeDeduccion / 100m, 0);
-        decimal salarioNeto   = salarioBruto - deduccionCCSS;
-
-        decimal aguinaldo  = Math.Round(salarioBruto / 12m, 0);
-        decimal vacaciones = Math.Round(salarioBruto / 12m * (10m / 22m), 0);
-
-        _salarioBrutoCalc = salarioBruto;
-        _deduccionesCalc  = deduccionCCSS;
-        _salarioNetoCalc  = salarioNeto;
-
-        ResumenExtraD        = $"{totalExtraD:N1} h  →  ₡{montoExtraD:N0}";
-        ResumenExtraN        = $"{totalExtraN:N1} h  →  ₡{montoExtraN:N0}";
-        ResumenDobles        = $"{totalDobles:N1} h  →  ₡{montoDobles:N0}";
-        ResumenFeriados      = $"{feriadosDias} día{(feriadosDias == 1 ? "" : "s")}  →  ₡{montoFeriados:N0}";
-        ResumenViaticos      = $"₡{_viaticos:N0}";
-        ResumenDescAusencias = $"{horasSinGoce:N1} h  →  -₡{descAusencias:N0}";
-        ResumenAusenciaGoce  = $"{horasConGoce:N1} h";
-        ResumenSalarioBruto  = $"₡{salarioBruto:N0}";
-        ResumenDeduccionCCSS = $"-₡{deduccionCCSS:N0}  ({_cfg.PorcentajeDeduccion:0.##}%)";
-        ResumenSalarioNeto   = $"₡{salarioNeto:N0}";
+        ResumenSalarioBase   = $"₡{c.SalarioFijo:N2}";
+        ResumenExtraD        = $"{c.HorasExtra:N1} h  →  ₡{c.MontoExtra:N2}";
+        ResumenExtraN        = $"{c.HorasNocturnas:N1} h  →  ₡{c.MontoNocturnas:N2}";
+        ResumenDobles        = $"{c.HorasDobles:N1} h  →  ₡{c.MontoDobles:N2}";
+        ResumenFeriados      = $"{c.DiasFeriado} día{(c.DiasFeriado == 1 ? "" : "s")}  →  ₡{c.MontoFeriados:N2}";
+        ResumenViaticos      = $"+₡{c.Viaticos:N2}";
+        ResumenDescAusencias = $"{c.HorasAusenciaSinGoce:N1} h  →  -₡{c.DescuentoAusencias:N2}";
+        ResumenAusenciaGoce  = $"{c.HorasAusenciaConGoce:N1} h";
+        ResumenSalarioBruto  = $"₡{c.Bruto:N2}";
+        ResumenDeduccionCCSS = $"-₡{c.Deducciones:N2}  ({c.PorcentajeDeduccion:0.##}%)";
+        ResumenSalarioNeto   = $"₡{c.Neto:N2}";
         ResumenAguinaldo     = $"₡{aguinaldo:N0}";
         ResumenVacaciones    = $"₡{vacaciones:N0}";
+        OnPropertyChanged(nameof(ResumenSalarioBase));
 
         NotifyResumen();
+        ActualizarEstadoPeriodo(actual);
+    }
 
-        var periodos = _db.ObtenerPeriodosLaborales(_uid);
-        var actual   = periodos.FirstOrDefault(p => p.FechaInicio.Date == _inicio.Date);
+    private void ActualizarEstadoPeriodo(PeriodoLaboral? actual)
+    {
         if (actual?.Cerrado == true)
         {
             PeriodoCerradoVisibility = Visibility.Visible;
@@ -700,18 +709,19 @@ public class ControlLaboralViewModel : BaseViewModel
 
     private void GuardarConfig()
     {
-        if (!decimal.TryParse(_cfgSalarioXHora.Replace(",", "."), NumberStyles.Any,
-            CultureInfo.InvariantCulture, out decimal sph) || sph < 0)
+        if (!Dinero.TryParse(_cfgSalarioMensual, out decimal mensual) || mensual < 0)
         {
-            ConfigMensaje = "Salario por hora inválido."; ConfigMensajeOk = false; return;
+            ConfigMensaje = "Salario mensual inválido."; ConfigMensajeOk = false; return;
         }
         if (!decimal.TryParse(_cfgJornada.Replace(",", "."), NumberStyles.Any,
                 CultureInfo.InvariantCulture, out decimal jornada) || jornada < 1m || jornada > 80m)
         {
             ConfigMensaje = "Jornada semanal inválida (1–80 horas)."; ConfigMensajeOk = false; return;
         }
-        if (!decimal.TryParse(_cfgViaticos.Replace(",", "."), NumberStyles.Any,
-            CultureInfo.InvariantCulture, out decimal viaticos) || viaticos < 0)
+        // Vacío = sin viáticos. Dinero y no decimal.TryParse: el campo se rellena con separador
+        // de miles y "25.000" se habría leído como 25.
+        decimal viaticos = 0m;
+        if (!string.IsNullOrWhiteSpace(_cfgViaticos) && (!Dinero.TryParse(_cfgViaticos, out viaticos) || viaticos < 0))
         {
             ConfigMensaje = "Viáticos inválidos."; ConfigMensajeOk = false; return;
         }
@@ -750,7 +760,7 @@ public class ControlLaboralViewModel : BaseViewModel
         _db.GuardarConfiguracionLaboral(new ConfiguracionLaboral
         {
             UsuarioId      = _uid,
-            SalarioPorHora = sph,
+            SalarioMensual = mensual,
             JornadaSemanal = jornada,
             ModoPago       = _cfgModoPago,
             DiaPago        = diaPago,
@@ -828,9 +838,9 @@ public class ControlLaboralViewModel : BaseViewModel
 
     private void CerrarPeriodo()
     {
-        if (_salXHora <= 0)
+        if (_cfg.SalarioMensual <= 0)
         {
-            MessageBox.Show("Configura el salario por hora antes de cerrar el período.",
+            MessageBox.Show("Configura el salario mensual antes de cerrar el período.",
                 "Control Laboral", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
@@ -843,8 +853,7 @@ public class ControlLaboralViewModel : BaseViewModel
 
         if (res != MessageBoxResult.Yes) return;
 
-        _db.ConsolidarPeriodoLaboral(_uid, _inicio, _fin,
-            _salarioBrutoCalc, _deduccionesCalc, _salarioNetoCalc);
+        _db.ConsolidarPeriodoLaboral(_uid, _inicio, _fin);
 
         CargarHistorial();
         ActualizarResumen();
@@ -866,50 +875,132 @@ public class ControlLaboralViewModel : BaseViewModel
         ActualizarResumen();
     }
 
-    // ── Acciones — editar cierre ──────────────────────────────────────────────
+    // ── Acciones — comprobante de pago ────────────────────────────────────────
 
-    private void AbrirEdicion(HistorialLaboralItem? item)
+    /// <summary>
+    /// Lo que debía pagarse en un período cerrado: sus registros con los parámetros congelados
+    /// al cerrarlo. Es contra esto que se compara el comprobante.
+    /// </summary>
+    private CalculoPeriodo CalculoDe(PeriodoLaboral p) =>
+        CalculoPeriodo.De(p.ConfiguracionAlCierre(_cfg), _db.ObtenerRegistrosDia(_uid, p.FechaInicio, p.FechaFin));
+
+    private void AbrirComprobante(HistorialLaboralItem? item)
     {
         if (item is null || !item.EsCierre) return;
-        _editTarget    = item;
-        EditBruto      = item.Bruto.ToString("F0");
-        EditDeducciones = item.Deducciones.ToString("F0");
-        EditNeto       = item.Monto.ToString("F0");
-        EditNotas      = item.Notas;
-        EditError      = "";
-        EditFormVisible = true;
-        OnPropertyChanged(nameof(EditTituloLabel));
+        var periodo = _db.ObtenerPeriodosLaborales(_uid).FirstOrDefault(p => p.Id == item.SourceId);
+        if (periodo is null) return;
+
+        _compTarget  = item;
+        _compCalculo = CalculoDe(periodo);
+
+        // Vacío si aún no se anotó. NO se rellena con lo calculado: copiar el número que la app
+        // ya espera es la manera de no ver una diferencia.
+        var c = _db.ObtenerComprobante(periodo.Id);
+        string M(decimal v) => c is null ? "" : v.ToString("N2");
+        string H(decimal v) => c is null ? "" : v.ToString("0.##");
+        _compSalarioFijo = M(c?.SalarioFijo ?? 0);
+        _compHorasExtra  = H(c?.HorasExtra ?? 0);
+        _compMontoExtra  = M(c?.MontoExtra ?? 0);
+        _compHorasNoct   = H(c?.HorasNocturnas ?? 0);
+        _compMontoNoct   = M(c?.MontoNocturnas ?? 0);
+        _compHorasDobles = H(c?.HorasDobles ?? 0);
+        _compMontoDobles = M(c?.MontoDobles ?? 0);
+        _compOtros       = M(c?.OtrosAjustes ?? 0);
+        _compViaticos    = M(c?.Viaticos ?? 0);
+        _compDeducciones = M(c?.Deducciones ?? 0);
+        _compNotas       = c?.Notas ?? "";
+        foreach (var p in new[] { nameof(CompSalarioFijo), nameof(CompHorasExtra), nameof(CompMontoExtra),
+                                  nameof(CompHorasNoct), nameof(CompMontoNoct), nameof(CompHorasDobles),
+                                  nameof(CompMontoDobles), nameof(CompOtros), nameof(CompViaticos),
+                                  nameof(CompDeducciones), nameof(CompNotas), nameof(ComprobanteTitulo) })
+            OnPropertyChanged(p);
+
+        CompError          = "";
+        ComprobanteVisible = true;
+        RecalcularComparacion();
     }
 
-    private void GuardarEdicion()
+    /// <summary>
+    /// Lee los campos. Vacío cuenta como cero —la mayoría de los comprobantes no traen horas
+    /// nocturnas—; lo que no se entiende se nombra en <paramref name="invalidos"/>.
+    /// </summary>
+    private ComprobantePago LeerComprobante(List<string> invalidos)
     {
-        EditError = "";
-        if (_editTarget is null) return;
-
-        if (!decimal.TryParse(_editBruto.Replace(",", "."), NumberStyles.Any,
-            CultureInfo.InvariantCulture, out decimal bruto) || bruto < 0)
+        decimal Leer(string texto, string concepto)
         {
-            EditError = "Ingreso bruto inválido."; return;
-        }
-        if (!decimal.TryParse(_editDeducciones.Replace(",", "."), NumberStyles.Any,
-            CultureInfo.InvariantCulture, out decimal ded) || ded < 0)
-        {
-            EditError = "Deducciones inválidas."; return;
-        }
-        if (!decimal.TryParse(_editNeto.Replace(",", "."), NumberStyles.Any,
-            CultureInfo.InvariantCulture, out decimal neto) || neto < 0)
-        {
-            EditError = "Salario neto inválido."; return;
+            if (string.IsNullOrWhiteSpace(texto)) return 0m;
+            if (Dinero.TryParse(texto, out var v)) return v;
+            invalidos.Add(concepto);
+            return 0m;
         }
 
-        _db.ActualizarPeriodoLaboral(_editTarget.SourceId, bruto, ded, neto, _editNotas.Trim());
+        return new ComprobantePago
+        {
+            PeriodoId      = _compTarget?.SourceId ?? 0,
+            SalarioFijo    = Leer(_compSalarioFijo, "salario fijo"),
+            HorasExtra     = Leer(_compHorasExtra,  "horas extra"),
+            MontoExtra     = Leer(_compMontoExtra,  "monto de horas extra"),
+            HorasNocturnas = Leer(_compHorasNoct,   "horas nocturnas"),
+            MontoNocturnas = Leer(_compMontoNoct,   "monto de horas nocturnas"),
+            HorasDobles    = Leer(_compHorasDobles, "horas dobles"),
+            MontoDobles    = Leer(_compMontoDobles, "monto de horas dobles"),
+            OtrosAjustes   = Leer(_compOtros,       "otros ajustes"),
+            Viaticos       = Leer(_compViaticos,    "viáticos"),
+            // En el comprobante la C.C.S.S. aparece en negativo; da igual cómo se copie.
+            Deducciones    = Math.Abs(Leer(_compDeducciones, "C.C.S.S.")),
+            Notas          = _compNotas.Trim()
+        };
+    }
 
-        EditFormVisible = false;
-        _editTarget     = null;
-        EditError       = "";
+    private void RecalcularComparacion()
+    {
+        if (_compCalculo is null) return;
+        var invalidos = new List<string>();
+        var comp      = LeerComprobante(invalidos);
 
+        // Con todo vacío no hay nada que comparar todavía: sólo se muestra lo calculado.
+        bool pendiente = new[] { _compSalarioFijo, _compHorasExtra, _compMontoExtra, _compHorasNoct,
+                                 _compMontoNoct, _compHorasDobles, _compMontoDobles, _compOtros,
+                                 _compViaticos, _compDeducciones }.All(string.IsNullOrWhiteSpace);
+
+        Comparacion.Clear();
+        foreach (var linea in LineaComparacion.Comparar(_compCalculo, comp, pendiente))
+            Comparacion.Add(linea);
+
+        CompError = invalidos.Count > 0 ? $"No se entiende: {string.Join(", ", invalidos)}." : "";
+    }
+
+    private void GuardarComprobante()
+    {
+        if (_compTarget is null) return;
+        var invalidos = new List<string>();
+        var comp      = LeerComprobante(invalidos);
+        if (invalidos.Count > 0)
+        {
+            CompError = $"No se entiende: {string.Join(", ", invalidos)}.";
+            return;
+        }
+
+        _db.GuardarComprobante(comp);
+        CerrarComprobante();
         CargarHistorial();
-        ActualizarResumen();
+    }
+
+    private void BorrarComprobante()
+    {
+        if (_compTarget is null) return;
+        _db.EliminarComprobante(_compTarget.SourceId);
+        CerrarComprobante();
+        CargarHistorial();
+    }
+
+    private void CerrarComprobante()
+    {
+        ComprobanteVisible = false;
+        CompError          = "";
+        _compTarget        = null;
+        _compCalculo       = null;
+        Comparacion.Clear();
     }
 
     // ── Acciones — eliminar historial ─────────────────────────────────────────
@@ -935,12 +1026,9 @@ public class ControlLaboralViewModel : BaseViewModel
         else
             _db.EliminarIngresoLaboralDirecto(item.SourceId);
 
-        // Si se estaba editando el mismo item, cerrar el form
-        if (_editTarget?.SourceId == item.SourceId && _editTarget?.EsCierre == item.EsCierre)
-        {
-            EditFormVisible = false;
-            _editTarget     = null;
-        }
+        // Si estaba abierto su comprobante, cerrarlo: el período (y el comprobante) ya no existen.
+        if (_compTarget?.SourceId == item.SourceId && _compTarget?.EsCierre == item.EsCierre)
+            CerrarComprobante();
 
         CargarHistorial();
         ActualizarResumen();
@@ -954,7 +1042,7 @@ public class ControlLaboralViewModel : BaseViewModel
         {
             var ruta = PdfLaboralService.Exportar(
                 PeriodoActualLabel,
-                _salXHora,
+                _cfg.SalarioPorHora,
                 _jornadaSemanal,
                 [.. Registros],
                 _salarioBrutoCalc,

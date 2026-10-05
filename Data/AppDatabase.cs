@@ -198,6 +198,9 @@ public class AppDatabase
         // Claves foráneas: recrea las tablas, así que va después de todas las migraciones
         // de columnas y antes de los índices (que se pierden al recrear).
         MigrarAClavesForaneas(conn);
+        // Después de las claves foráneas: aquella migración recrea las tablas con una lista fija
+        // de columnas y perdería las que se añaden aquí.
+        MigrarComprobantesDePago(conn);
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -2153,12 +2156,60 @@ public class AppDatabase
         }
         catch { tr.Rollback(); throw; }
     }
+    /// <summary>
+    /// Parte 2 de Control Laboral: el salario se configura como mensual, cada período cerrado
+    /// guarda los parámetros con que se calculó, y el comprobante de pago se anota aparte.
+    /// </summary>
+    private static void MigrarComprobantesDePago(SqliteConnection conn)
+    {
+        var cfgCols = GetColumnas(conn, "ConfiguracionLaboral");
+        if (!cfgCols.Contains("SalarioMensual"))
+        {
+            AddColumna(conn, "ConfiguracionLaboral", "SalarioMensual", "REAL NOT NULL DEFAULT 0");
+            // Se deshace la cuenta con que se obtuvo la hora: mensual ÷ (jornada × 52 / 12). Es
+            // una aproximación —la hora se guardaba sin decimales— y conviene corregirla a mano
+            // con el "Salario Fijo" del comprobante × 2.
+            EjecutarNonQuery(conn, """
+                UPDATE ConfiguracionLaboral
+                SET SalarioMensual = ROUND(SalarioPorHora * JornadaSemanal * 52.0 / 12.0, 2)
+                WHERE SalarioPorHora > 0
+                """);
+        }
+
+        var plCols = GetColumnas(conn, "PeriodosLaborales");
+        if (!plCols.Contains("SalarioMensual"))
+            AddColumna(conn, "PeriodosLaborales", "SalarioMensual", "REAL");
+        if (!plCols.Contains("PorcentajeDeduccion"))
+            AddColumna(conn, "PeriodosLaborales", "PorcentajeDeduccion", "REAL");
+        if (!plCols.Contains("Viaticos"))
+            AddColumna(conn, "PeriodosLaborales", "Viaticos", "REAL");
+
+        // Uno por período, y se va con él.
+        EjecutarNonQuery(conn, """
+            CREATE TABLE IF NOT EXISTS ComprobantesPago (
+                PeriodoId      INTEGER PRIMARY KEY,
+                SalarioFijo    REAL NOT NULL DEFAULT 0,
+                HorasExtra     REAL NOT NULL DEFAULT 0,
+                MontoExtra     REAL NOT NULL DEFAULT 0,
+                HorasNocturnas REAL NOT NULL DEFAULT 0,
+                MontoNocturnas REAL NOT NULL DEFAULT 0,
+                HorasDobles    REAL NOT NULL DEFAULT 0,
+                MontoDobles    REAL NOT NULL DEFAULT 0,
+                OtrosAjustes   REAL NOT NULL DEFAULT 0,
+                Viaticos       REAL NOT NULL DEFAULT 0,
+                Deducciones    REAL NOT NULL DEFAULT 0,
+                Notas          TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (PeriodoId) REFERENCES PeriodosLaborales(Id) ON DELETE CASCADE
+            )
+            """);
+    }
+
     public ConfiguracionLaboral ObtenerConfiguracionLaboral(int usuarioId)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos,
+            SELECT SalarioMensual, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos,
                    DiasPorSemana, PorcentajeDeduccion
             FROM ConfiguracionLaboral WHERE UsuarioId=$uid
             """;
@@ -2168,7 +2219,7 @@ public class AppDatabase
             return new ConfiguracionLaboral
             {
                 UsuarioId      = usuarioId,
-                SalarioPorHora = (decimal)r.GetDouble(0),
+                SalarioMensual = (decimal)r.GetDouble(0),
                 JornadaSemanal = (decimal)r.GetDouble(1),
                 DiaPago        = r.GetInt32(2),
                 ModoPago       = r.IsDBNull(3) ? "Mensual" : r.GetString(3),
@@ -2186,14 +2237,15 @@ public class AppDatabase
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
-            INSERT INTO ConfiguracionLaboral (UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos, DiasPorSemana, PorcentajeDeduccion)
-            VALUES ($uid,$sph,$js,$dp,$mp,$dp2,$ds,$vt,$dxs,$pct)
+            INSERT INTO ConfiguracionLaboral (UsuarioId, SalarioMensual, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos, DiasPorSemana, PorcentajeDeduccion)
+            VALUES ($uid,$sm,$sph,$js,$dp,$mp,$dp2,$ds,$vt,$dxs,$pct)
             ON CONFLICT(UsuarioId) DO UPDATE SET
-                SalarioPorHora=$sph, JornadaSemanal=$js, DiaPago=$dp,
+                SalarioMensual=$sm, SalarioPorHora=$sph, JornadaSemanal=$js, DiaPago=$dp,
                 ModoPago=$mp, DiaPago2=$dp2, DiaSemana=$ds, Viaticos=$vt,
                 DiasPorSemana=$dxs, PorcentajeDeduccion=$pct
             """,
-            ("$uid", c.UsuarioId), ("$sph", (double)c.SalarioPorHora),
+            // SalarioPorHora ya no se lee: se escribe derivado sólo para que la columna no mienta.
+            ("$uid", c.UsuarioId), ("$sm", (double)c.SalarioMensual), ("$sph", (double)c.SalarioPorHora),
             ("$js",  (double)c.JornadaSemanal), ("$dp",  c.DiaPago),
             ("$mp",  c.ModoPago),       ("$dp2", c.DiaPago2),
             ("$ds",  c.DiaSemana),      ("$vt",  (double)c.Viaticos),
@@ -2276,7 +2328,8 @@ public class AppDatabase
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Id, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto,
-                   Cerrado, TransaccionId, Notas
+                   Cerrado, TransaccionId, Notas,
+                   SalarioMensual, PorcentajeDeduccion, Viaticos
             FROM PeriodosLaborales
             WHERE UsuarioId=$uid
             ORDER BY FechaInicio DESC
@@ -2296,7 +2349,10 @@ public class AppDatabase
                 SalarioNeto   = (decimal)r.GetDouble(5),
                 Cerrado       = r.GetInt32(6) == 1,
                 TransaccionId = r.IsDBNull(7) ? null : r.GetInt32(7),
-                Notas         = r.IsDBNull(8) ? "" : r.GetString(8)
+                Notas         = r.IsDBNull(8) ? "" : r.GetString(8),
+                SalarioMensualAlCierre      = r.IsDBNull(9)  ? null : (decimal)r.GetDouble(9),
+                PorcentajeDeduccionAlCierre = r.IsDBNull(10) ? null : (decimal)r.GetDouble(10),
+                ViaticosAlCierre            = r.IsDBNull(11) ? null : (decimal)r.GetDouble(11)
             });
         return list;
     }
@@ -2489,24 +2545,93 @@ public class AppDatabase
     }
 
     /// <summary>
-    /// Consolida el resumen del período en PeriodosLaborales SIN generar ingreso automático.
-    /// TransaccionId queda NULL — el ingreso se registra por separado si el usuario lo desea.
+    /// Cierra el período SIN generar ingreso automático (TransaccionId queda NULL; el ingreso se
+    /// registra por separado). Calcula aquí, con los registros guardados y la configuración
+    /// vigente, y congela los parámetros usados: así lo cerrado no depende de lo que la pantalla
+    /// tuviera en memoria, ni cambia si después suben los viáticos o el salario.
     /// </summary>
-    public void ConsolidarPeriodoLaboral(int usuarioId, DateTime inicio, DateTime fin,
-        decimal salarioBruto, decimal deducciones, decimal salarioNeto)
+    public CalculoPeriodo ConsolidarPeriodoLaboral(int usuarioId, DateTime inicio, DateTime fin)
+    {
+        var cfg  = ObtenerConfiguracionLaboral(usuarioId);
+        var calc = CalculoPeriodo.De(cfg, ObtenerRegistrosDia(usuarioId, inicio, fin));
+
+        using var conn = Abrir();
+        EjecutarNonQuery(conn,
+            """
+            INSERT INTO PeriodosLaborales (UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones,
+                                           SalarioNeto, Cerrado, SalarioMensual, PorcentajeDeduccion, Viaticos)
+            VALUES ($uid, $ini, $fin, $sb, $ded, $sn, 1, $sm, $pct, $vt)
+            ON CONFLICT(UsuarioId, FechaInicio) DO UPDATE SET
+                FechaFin=$fin, SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1,
+                SalarioMensual=$sm, PorcentajeDeduccion=$pct, Viaticos=$vt
+            """,
+            ("$uid", usuarioId),
+            ("$ini", inicio.ToString("yyyy-MM-dd")), ("$fin", fin.ToString("yyyy-MM-dd")),
+            ("$sb",  (double)calc.Bruto), ("$ded", (double)calc.Deducciones),
+            ("$sn",  (double)calc.Neto),
+            ("$sm",  (double)cfg.SalarioMensual), ("$pct", (double)cfg.PorcentajeDeduccion),
+            ("$vt",  (double)cfg.Viaticos));
+        return calc;
+    }
+
+    // ── Comprobantes de pago ──────────────────────────────────────────────────
+
+    public ComprobantePago? ObtenerComprobante(int periodoId)
+    {
+        using var conn = Abrir();
+        using var cmd  = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT SalarioFijo, HorasExtra, MontoExtra, HorasNocturnas, MontoNocturnas,
+                   HorasDobles, MontoDobles, OtrosAjustes, Viaticos, Deducciones, Notas
+            FROM ComprobantesPago WHERE PeriodoId=$id
+            """;
+        cmd.Parameters.AddWithValue("$id", periodoId);
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        return new ComprobantePago
+        {
+            PeriodoId      = periodoId,
+            SalarioFijo    = (decimal)r.GetDouble(0),
+            HorasExtra     = (decimal)r.GetDouble(1),
+            MontoExtra     = (decimal)r.GetDouble(2),
+            HorasNocturnas = (decimal)r.GetDouble(3),
+            MontoNocturnas = (decimal)r.GetDouble(4),
+            HorasDobles    = (decimal)r.GetDouble(5),
+            MontoDobles    = (decimal)r.GetDouble(6),
+            OtrosAjustes   = (decimal)r.GetDouble(7),
+            Viaticos       = (decimal)r.GetDouble(8),
+            Deducciones    = (decimal)r.GetDouble(9),
+            Notas          = r.GetString(10)
+        };
+    }
+
+    public void GuardarComprobante(ComprobantePago c)
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
-            INSERT INTO PeriodosLaborales (UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto, Cerrado)
-            VALUES ($uid, $ini, $fin, $sb, $ded, $sn, 1)
-            ON CONFLICT(UsuarioId, FechaInicio) DO UPDATE SET
-                FechaFin=$fin, SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1
+            INSERT INTO ComprobantesPago (PeriodoId, SalarioFijo, HorasExtra, MontoExtra, HorasNocturnas,
+                MontoNocturnas, HorasDobles, MontoDobles, OtrosAjustes, Viaticos, Deducciones, Notas)
+            VALUES ($id, $sf, $he, $me, $hn, $mn, $hd, $md, $oa, $vt, $ded, $notas)
+            ON CONFLICT(PeriodoId) DO UPDATE SET
+                SalarioFijo=$sf, HorasExtra=$he, MontoExtra=$me, HorasNocturnas=$hn,
+                MontoNocturnas=$mn, HorasDobles=$hd, MontoDobles=$md, OtrosAjustes=$oa,
+                Viaticos=$vt, Deducciones=$ded, Notas=$notas
             """,
-            ("$uid", usuarioId),
-            ("$ini", inicio.ToString("yyyy-MM-dd")), ("$fin", fin.ToString("yyyy-MM-dd")),
-            ("$sb",  (double)salarioBruto), ("$ded", (double)deducciones),
-            ("$sn",  (double)salarioNeto));
+            ("$id", c.PeriodoId),
+            ("$sf", (double)c.SalarioFijo),
+            ("$he", (double)c.HorasExtra),     ("$me", (double)c.MontoExtra),
+            ("$hn", (double)c.HorasNocturnas), ("$mn", (double)c.MontoNocturnas),
+            ("$hd", (double)c.HorasDobles),    ("$md", (double)c.MontoDobles),
+            ("$oa", (double)c.OtrosAjustes),
+            ("$vt", (double)c.Viaticos),       ("$ded", (double)c.Deducciones),
+            ("$notas", c.Notas));
+    }
+
+    public void EliminarComprobante(int periodoId)
+    {
+        using var conn = Abrir();
+        EjecutarNonQuery(conn, "DELETE FROM ComprobantesPago WHERE PeriodoId=$id", ("$id", periodoId));
     }
 
     /// <summary>Elimina los registros diarios de un rango de fechas.</summary>
@@ -2633,42 +2758,6 @@ public class AppDatabase
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", transId.Value));
 
             EjecutarNonQuery(conn, "DELETE FROM IngresoLaboralDirecto WHERE Id=$id", ("$id", id));
-            tr.Commit();
-        }
-        catch { tr.Rollback(); throw; }
-    }
-
-    public void ActualizarPeriodoLaboral(int id, decimal salarioBruto, decimal deducciones,
-        decimal salarioNeto, string notas)
-    {
-        using var conn = Abrir();
-        using var tr   = conn.BeginTransaction();
-        try
-        {
-            // Leer TransaccionId actual para actualizar el monto
-            int? transId = null;
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "SELECT TransaccionId FROM PeriodosLaborales WHERE Id=$id";
-                cmd.Parameters.AddWithValue("$id", id);
-                var v = cmd.ExecuteScalar();
-                if (v is long l) transId = (int)l;
-            }
-
-            EjecutarNonQuery(conn,
-                "UPDATE PeriodosLaborales SET SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Notas=$notas WHERE Id=$id",
-                ("$sb",    (double)salarioBruto),
-                ("$ded",   (double)deducciones),
-                ("$sn",    (double)salarioNeto),
-                ("$notas", notas),
-                ("$id",    id));
-
-            // Actualizar monto de la transacción vinculada (no afecta saldo de cuenta ya que CuentaId era NULL)
-            if (transId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Transacciones SET Monto=$m WHERE Id=$id",
-                    ("$m", (double)salarioNeto), ("$id", transId.Value));
-
             tr.Commit();
         }
         catch { tr.Rollback(); throw; }

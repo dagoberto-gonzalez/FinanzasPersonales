@@ -212,13 +212,14 @@ public class Bloque3IntegridadTests
 
         // Datos repartidos por las tablas que antes NO se limpiaban.
         t.Db.InsertarCuenta(new Cuenta { Nombre = "Suya" }, otro);
-        t.Db.GuardarConfiguracionLaboral(new ConfiguracionLaboral { UsuarioId = otro, SalarioPorHora = 3000 });
+        t.Db.GuardarConfiguracionLaboral(new ConfiguracionLaboral { UsuarioId = otro, SalarioMensual = 720_000 });
         t.Db.InsertarOActualizarRegistroDia(new RegistroDiaLaboral
         {
             UsuarioId = otro, Fecha = new DateTime(2026, 9, 1), HorasExtraDiurnas = 3
         });
-        t.Db.ConsolidarPeriodoLaboral(otro, new DateTime(2026, 9, 1), new DateTime(2026, 9, 30),
-                                      800000, 86400, 713600);
+        t.Db.ConsolidarPeriodoLaboral(otro, new DateTime(2026, 9, 1), new DateTime(2026, 9, 30));
+        var periodoId = t.Db.ObtenerPeriodosLaborales(otro).Single().Id;
+        t.Db.GuardarComprobante(new ComprobantePago { PeriodoId = periodoId, SalarioFijo = 360_000 });
         t.Db.InsertarIngresoLaboralDirecto(otro, new DateTime(2026, 9, 15), 400000, "Quincena", null);
         t.Db.CerrarMes(otro, 2026, 9);
         // Y algunas de las que sí se limpiaban.
@@ -240,6 +241,9 @@ public class Bloque3IntegridadTests
         {
             Assert.Equal(0, t.Escalar<long>($"SELECT COUNT(*) FROM {tabla} WHERE UsuarioId={otro}"));
         }
+
+        // No tiene UsuarioId: se va en cascada con su período.
+        Assert.Equal(0, t.Escalar<long>($"SELECT COUNT(*) FROM ComprobantesPago WHERE PeriodoId={periodoId}"));
 
         Assert.DoesNotContain(t.Db.ObtenerUsuarios(), u => u.Id == otro);
         Assert.Empty(t.Db.VerificarIntegridad());
