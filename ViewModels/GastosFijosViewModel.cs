@@ -1,5 +1,5 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
+using FinanzasPersonales.Services;
 using System.Windows;
 using System.Windows.Input;
 using FinanzasPersonales.Data;
@@ -74,6 +74,25 @@ public class GastosFijosViewModel : BaseViewModel
     public Visibility MensajeErrorVisibility =>
         string.IsNullOrEmpty(_error) ? Visibility.Collapsed : Visibility.Visible;
 
+    // ── Edición ───────────────────────────────────────────────────────────────
+    // Antes sólo se podía crear y borrar: si subía el alquiler había que borrarlo y crearlo de
+    // nuevo, y borrar un fijo se lleva por delante sus pagos de meses anteriores.
+    private int? _editandoId;
+
+    public bool       EstaEditando       => _editandoId is not null;
+    public Visibility EditandoVisibility => EstaEditando ? Visibility.Visible : Visibility.Collapsed;
+    public string     TituloFormulario   => EstaEditando ? $"Editar gasto fijo: {_nombreOriginal}" : "Agregar gasto fijo";
+    public string     TextoGuardar       => EstaEditando ? "Guardar cambios" : "Agregar";
+    private string    _nombreOriginal    = "";
+
+    private void NotificarEdicion()
+    {
+        OnPropertyChanged(nameof(EstaEditando));
+        OnPropertyChanged(nameof(EditandoVisibility));
+        OnPropertyChanged(nameof(TituloFormulario));
+        OnPropertyChanged(nameof(TextoGuardar));
+    }
+
     // ── Datos ─────────────────────────────────────────────────────────────────
     public ObservableCollection<GastoFijoVm>              GastosFijos   { get; } = [];
     public ObservableCollection<GrupoDia<GastoFijoVm>>    GruposGastos  { get; } = [];
@@ -96,6 +115,8 @@ public class GastosFijosViewModel : BaseViewModel
     public ICommand GuardarCommand    { get; }
     public ICommand EliminarCommand   { get; }
     public ICommand TogglePagoCommand { get; }
+    public ICommand EditarCommand     { get; }
+    public ICommand CancelarEdicionCommand { get; }
 
     public GastosFijosViewModel(AppDatabase db, int usuarioId)
     {
@@ -104,6 +125,8 @@ public class GastosFijosViewModel : BaseViewModel
         GuardarCommand   = new RelayCommand(Guardar);
         EliminarCommand  = new RelayCommand<GastoFijoVm>(Eliminar);
         TogglePagoCommand = new RelayCommand<GastoFijoVm>(TogglePago);
+        EditarCommand    = new RelayCommand<GastoFijoVm>(Editar);
+        CancelarEdicionCommand = new RelayCommand(LimpiarFormulario);
         Cargar();
     }
 
@@ -156,9 +179,9 @@ public class GastosFijosViewModel : BaseViewModel
             return;
         }
 
-        if (!decimal.TryParse(_monto.Replace(",", "."),
-                NumberStyles.Any, CultureInfo.InvariantCulture, out var montoDecimal)
-            || montoDecimal <= 0)
+        // Dinero y no decimal.TryParse: al editar, el monto llega como "25.000", que el parseo
+        // anterior leía como 25.
+        if (!Dinero.TryParsePositivo(_monto, out var montoDecimal))
         {
             MensajeError = "Ingresa un monto válido mayor a 0.";
             return;
@@ -185,19 +208,60 @@ public class GastosFijosViewModel : BaseViewModel
             }
         }
 
-        _db.InsertarGastoFijo(new GastoFijo
+        var gasto = new GastoFijo
         {
+            Id              = _editandoId ?? 0,
             Nombre          = _nombre.Trim(),
             Monto           = montoDecimal,
             DiaVencimiento  = dia,
             DiaVencimiento2 = dia2
-        }, _uid);
+        };
 
+        try
+        {
+            if (_editandoId is null) _db.InsertarGastoFijo(gasto, _uid);
+            else                     _db.ActualizarGastoFijo(gasto, _uid);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            MensajeError = ex.Message;
+            return;
+        }
+
+        LimpiarFormulario();
+        Cargar();
+    }
+
+    private void LimpiarFormulario()
+    {
+        _editandoId     = null;
+        _nombreOriginal = "";
+        NotificarEdicion();
+        MensajeError    = string.Empty;
         Nombre          = string.Empty;
         Monto           = string.Empty;
         DiaVencimiento  = "1";
         DiaVencimiento2 = string.Empty;
-        Cargar();
+    }
+
+    /// <summary>
+    /// Carga el gasto en el formulario. Se lee de la base y no de la fila: un gasto con dos días
+    /// aparece en dos filas, y cada una sólo conoce su propio día.
+    /// </summary>
+    private void Editar(GastoFijoVm? vm)
+    {
+        if (vm is null) return;
+        var g = _db.ObtenerGastoFijo(vm.Id, _uid);
+        if (g is null) { Cargar(); return; }
+
+        _editandoId     = g.Id;
+        _nombreOriginal = g.Nombre;
+        Nombre          = g.Nombre;
+        Monto           = g.Monto % 1 == 0 ? g.Monto.ToString("N0") : g.Monto.ToString("N2");
+        DiaVencimiento  = g.DiaVencimiento.ToString();
+        DiaVencimiento2 = g.DiaVencimiento2 > 0 ? g.DiaVencimiento2.ToString() : string.Empty;
+        MensajeError    = string.Empty;
+        NotificarEdicion();
     }
 
     private void Eliminar(GastoFijoVm? vm)
@@ -210,6 +274,7 @@ public class GastosFijosViewModel : BaseViewModel
             System.Windows.MessageBoxImage.Warning);
         if (res != System.Windows.MessageBoxResult.Yes) return;
         _db.EliminarGastoFijo(vm.Id);
+        if (_editandoId == vm.Id) LimpiarFormulario();
         Cargar();
     }
 

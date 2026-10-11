@@ -1706,6 +1706,115 @@ public class AppDatabase
             ("$uid", usuarioId), ("$n", g.Nombre), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", dia2));
     }
 
+    /// <summary>La configuración de un gasto fijo (no su estado de un mes), para editarlo.</summary>
+    public GastoFijo? ObtenerGastoFijo(int id, int usuarioId)
+    {
+        using var conn = Abrir();
+        using var cmd  = conn.CreateCommand();
+        cmd.CommandText = "SELECT Nombre, Monto, DiaVencimiento, DiaVencimiento2, Activo FROM GastosFijos WHERE Id=$id AND UsuarioId=$uid";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$uid", usuarioId);
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        return new GastoFijo
+        {
+            Id = id, Nombre = r.GetString(0), Monto = (decimal)r.GetDouble(1),
+            DiaVencimiento = r.GetInt32(2), DiaVencimiento2 = r.GetInt32(3), Activo = r.GetInt32(4) == 1
+        };
+    }
+
+    /// <summary>
+    /// Edita un gasto fijo. Lo ya pagado no cambia: cada pago es una transacción con su propio
+    /// monto, que se corrige en Transacciones. El monto nuevo vale desde el próximo pago.
+    /// Si cambian los días, los pagos registrados se trasladan: ver <see cref="ReubicarPagos"/>.
+    /// </summary>
+    public void ActualizarGastoFijo(GastoFijo g, int usuarioId)
+    {
+        ValidarFijo(g.Nombre, g.Monto, g.DiaVencimiento, g.DiaVencimiento2);
+        var viejo = ObtenerGastoFijo(g.Id, usuarioId)
+                    ?? throw new InvalidOperationException("El gasto fijo ya no existe.");
+        var dia2  = g.DiaVencimiento2 == g.DiaVencimiento ? 0 : g.DiaVencimiento2;   // ver InsertarGastoFijo
+
+        using var conn = Abrir();
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            EjecutarNonQuery(conn,
+                "UPDATE GastosFijos SET Nombre=$n, Monto=$m, DiaVencimiento=$d, DiaVencimiento2=$d2 WHERE Id=$id AND UsuarioId=$uid",
+                ("$n", g.Nombre.Trim()), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", dia2),
+                ("$id", g.Id), ("$uid", usuarioId));
+            ReubicarPagos(conn, "Gasto", g.Id,
+                [viejo.DiaVencimiento, viejo.DiaVencimiento2], [g.DiaVencimiento, dia2]);
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
+    }
+
+    private static void ValidarFijo(string nombre, decimal monto, int dia, int dia2)
+    {
+        if (string.IsNullOrWhiteSpace(nombre)) throw new ArgumentException("El nombre es requerido.");
+        if (monto <= 0)                        throw new ArgumentException("El monto tiene que ser mayor que cero.");
+        if (dia is < 1 or > 31)                throw new ArgumentException("El día debe ser entre 1 y 31.");
+        if (dia2 is < 0 or > 31)               throw new ArgumentException("El segundo día debe ser entre 1 y 31.");
+    }
+
+    /// <summary>
+    /// Traslada los pagos registrados de un fijo cuando cambian sus días.
+    /// <para>
+    /// <c>PagosMensuales</c> identifica cada pago por su día (está en la clave única). Sin esto,
+    /// pasar el vencimiento del 10 al 15 en un mes ya pagado mostraba el del 15 como pendiente:
+    /// se podía pagar otra vez y el gasto se contaba doble.
+    /// </para>
+    /// <para>
+    /// Un día que se mantiene conserva sus pagos. Un día que desaparece le pasa los suyos al día
+    /// que aparece en su lugar. Si desaparece sin reemplazo, sus pagos pendientes se borran y los
+    /// ya pagados se quedan como historial (su transacción es dinero que se movió de verdad).
+    /// El traslado usa días negativos como paso intermedio para no chocar con la clave única,
+    /// p. ej. al intercambiar los días 10 y 25.
+    /// </para>
+    /// </summary>
+    private static void ReubicarPagos(SqliteConnection conn, string tipo, int fijoId, int[] viejos, int[] nuevos)
+    {
+        var quitados = viejos.Where(d => d > 0).Except(nuevos).OrderBy(d => d).ToList();
+        var puestos  = nuevos.Where(d => d > 0).Except(viejos).OrderBy(d => d).ToList();
+        var pares    = quitados.Zip(puestos).ToList();
+
+        const string Del = "TipoFijo=$t AND FijoId=$f";
+        (string, object?) T = ("$t", tipo), F = ("$f", fijoId);
+
+        foreach (var (viejo, nuevo) in pares)
+            EjecutarNonQuery(conn, $"UPDATE PagosMensuales SET Dia=-$n WHERE {Del} AND Dia=$v",
+                T, F, ("$v", viejo), ("$n", nuevo));
+
+        foreach (var sobrante in quitados.Skip(pares.Count))
+            EjecutarNonQuery(conn, $"DELETE FROM PagosMensuales WHERE {Del} AND Dia=$v AND Pagado=0",
+                T, F, ("$v", sobrante));
+
+        foreach (var (_, nuevo) in pares)
+        {
+            // Lo que ya hubiera en el día de destino ese mismo mes (restos de una configuración
+            // anterior, o filas vacías que la pantalla crea al abrirse): si está sin pagar, sobra.
+            const string MismoMes =
+                "EXISTS (SELECT 1 FROM PagosMensuales q WHERE q.TipoFijo=$t AND q.FijoId=$f " +
+                "AND q.Anio=PagosMensuales.Anio AND q.Mes=PagosMensuales.Mes AND q.Dia=$otro)";
+            EjecutarNonQuery(conn, $"DELETE FROM PagosMensuales WHERE {Del} AND Dia=$n AND Pagado=0 AND {MismoMes}",
+                T, F, ("$n", nuevo), ("$otro", -nuevo));
+            EjecutarNonQuery(conn, $"DELETE FROM PagosMensuales WHERE {Del} AND Dia=$neg AND Pagado=0 AND {MismoMes}",
+                T, F, ("$neg", -nuevo), ("$otro", nuevo));
+
+            var choques = EjecutarScalar<long>(conn,
+                $"SELECT COUNT(*) FROM PagosMensuales WHERE {Del} AND Dia=$neg AND {MismoMes}",
+                T, F, ("$neg", -nuevo), ("$otro", nuevo));
+            if (choques > 0)
+                throw new InvalidOperationException(
+                    $"Hay un mes con pagos registrados tanto en el día de antes como en el día {nuevo}: " +
+                    "no se pueden juntar. Desmarca uno de los dos pagos y vuelve a intentarlo.");
+
+            EjecutarNonQuery(conn, $"UPDATE PagosMensuales SET Dia=$n WHERE {Del} AND Dia=$neg",
+                T, F, ("$n", nuevo), ("$neg", -nuevo));
+        }
+    }
+
     public void EliminarGastoFijo(int id)
     {
         using var conn = Abrir();
@@ -1893,6 +2002,51 @@ public class AppDatabase
             ("$uid", usuarioId), ("$n", i.Nombre), ("$m", (double)i.Monto),
             ("$d", i.DiaIngreso), ("$d2", dia2),
             ("$cid", i.CuentaId.HasValue ? i.CuentaId.Value : DBNull.Value));
+    }
+
+    /// <summary>La configuración de un ingreso fijo (no su estado de un mes), para editarlo.</summary>
+    public IngresoFijo? ObtenerIngresoFijo(int id, int usuarioId)
+    {
+        using var conn = Abrir();
+        using var cmd  = conn.CreateCommand();
+        cmd.CommandText = "SELECT Nombre, Monto, DiaIngreso, DiaIngreso2, Activo, CuentaId FROM IngresosFijos WHERE Id=$id AND UsuarioId=$uid";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$uid", usuarioId);
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        return new IngresoFijo
+        {
+            Id = id, Nombre = r.GetString(0), Monto = (decimal)r.GetDouble(1),
+            DiaIngreso = r.GetInt32(2), DiaIngreso2 = r.GetInt32(3), Activo = r.GetInt32(4) == 1,
+            CuentaId = r.IsDBNull(5) ? null : r.GetInt32(5)
+        };
+    }
+
+    /// <summary>
+    /// Edita un ingreso fijo. Como en <see cref="ActualizarGastoFijo"/>: lo ya recibido no cambia
+    /// (monto y cuenta valen desde el próximo cobro) y los cobros se trasladan si cambian los días.
+    /// </summary>
+    public void ActualizarIngresoFijo(IngresoFijo i, int usuarioId)
+    {
+        ValidarFijo(i.Nombre, i.Monto, i.DiaIngreso, i.DiaIngreso2);
+        var viejo = ObtenerIngresoFijo(i.Id, usuarioId)
+                    ?? throw new InvalidOperationException("El ingreso fijo ya no existe.");
+        var dia2  = i.DiaIngreso2 == i.DiaIngreso ? 0 : i.DiaIngreso2;
+
+        using var conn = Abrir();
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            EjecutarNonQuery(conn,
+                "UPDATE IngresosFijos SET Nombre=$n, Monto=$m, DiaIngreso=$d, DiaIngreso2=$d2, CuentaId=$cid WHERE Id=$id AND UsuarioId=$uid",
+                ("$n", i.Nombre.Trim()), ("$m", (double)i.Monto), ("$d", i.DiaIngreso), ("$d2", dia2),
+                ("$cid", i.CuentaId.HasValue ? i.CuentaId.Value : DBNull.Value),
+                ("$id", i.Id), ("$uid", usuarioId));
+            ReubicarPagos(conn, "Ingreso", i.Id,
+                [viejo.DiaIngreso, viejo.DiaIngreso2], [i.DiaIngreso, dia2]);
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
     }
 
     public void EliminarIngresoFijo(int id)
