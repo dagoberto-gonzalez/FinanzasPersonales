@@ -107,7 +107,7 @@ public class ReportesViewModel : BaseViewModel
     private void CalcularResumenAnual()
     {
         var del_anio = _db.ObtenerTransacciones(_uid)
-            .Where(t => t.Fecha.Year == _anioSeleccionado && t.TarjetaCreditoId == null).ToList();
+            .Where(t => t.Fecha.Year == _anioSeleccionado && t.AfectaPresupuesto).ToList();
 
         _ingresosAnio = del_anio.Where(t => t.Tipo == "Ingreso").Sum(t => t.Monto);
         _gastosAnio   = del_anio.Where(t => t.Tipo == "Gasto").Sum(t => t.Monto);
@@ -123,8 +123,8 @@ public class ReportesViewModel : BaseViewModel
         int mesA   = _mesIndexA + 1;
         int mesB   = _mesIndexB + 1;
 
-        var transA = todas.Where(t => t.Fecha.Year == _anioA && t.Fecha.Month == mesA && t.TarjetaCreditoId == null).ToList();
-        var transB = todas.Where(t => t.Fecha.Year == _anioB && t.Fecha.Month == mesB && t.TarjetaCreditoId == null).ToList();
+        var transA = todas.Where(t => t.Fecha.Year == _anioA && t.Fecha.Month == mesA && t.AfectaPresupuesto).ToList();
+        var transB = todas.Where(t => t.Fecha.Year == _anioB && t.Fecha.Month == mesB && t.AfectaPresupuesto).ToList();
 
         _ingresosA = transA.Where(t => t.Tipo == "Ingreso").Sum(t => t.Monto);
         _gastosA   = transA.Where(t => t.Tipo == "Gasto").Sum(t => t.Monto);

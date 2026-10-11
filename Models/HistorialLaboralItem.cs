@@ -13,6 +13,9 @@ public class HistorialLaboralItem
     public int      SourceId         { get; set; }
     public int?     TransaccionId    { get; set; }
 
+    /// <summary>Estado del comprobante de pago frente a lo calculado. Sólo en cierres.</summary>
+    public string   Comprobante      { get; set; } = "";
+
     public string BrutoDisplay       => EsCierre ? $"₡{Bruto:N0}"        : "—";
     public string DeduccionesDisplay => EsCierre ? $"-₡{Deducciones:N0}" : "—";
     public string TipoDisplay        => EsCierre ? "Cierre período"       : "Ingreso directo";

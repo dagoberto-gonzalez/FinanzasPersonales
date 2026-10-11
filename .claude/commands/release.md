@@ -1,0 +1,1 @@
+Prepare a release: 1) dotnet build in Release with 0 errors, 2) bump the version in FinanzasPersonales.csproj to $ARGUMENTS, 3) run build-installer.bat, 4) confirm the installer .exe was generated and show its path, 5) commit "release: v$ARGUMENTS".

@@ -121,14 +121,25 @@
 
                 <Border Grid.Column="0" Style="{StaticResource Card}">
                     <StackPanel>
-                        <TextBlock Text="BALANCE TOTAL"
+                        <TextBlock Text="DISPONIBLE"
                                    Foreground="{StaticResource TextMutedBrush}"
                                    FontSize="11" FontWeight="SemiBold"/>
                         <TextBlock Text="{Binding BalanceTotalTexto}"
                                    Foreground="{Binding BalanceBrush}"
                                    FontSize="28" FontWeight="Bold" Margin="0,8,0,4"/>
-                        <TextBlock Text="Saldo acumulado"
-                                   Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                        <TextBlock Text="Dinero real, sin contar lo comprado a crédito"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="12" TextWrapping="Wrap"/>
+
+                        <!-- La deuda va aparte del disponible: son dos cosas distintas -->
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0"
+                                    Visibility="{Binding DeudaTarjetasVisibility}">
+                            <TextBlock Text="Deuda de tarjetas: "
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            <TextBlock Text="{Binding DeudaTarjetasTexto}"
+                                       Foreground="{StaticResource RedBrush}"
+                                       FontSize="12" FontWeight="SemiBold"/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -153,8 +164,9 @@
                         <TextBlock Text="{Binding GastosMesTexto}"
                                    Foreground="{StaticResource RedBrush}"
                                    FontSize="28" FontWeight="Bold" Margin="0,8,0,4"/>
-                        <TextBlock Text="&#x2193; Salidas este mes"
-                                   Foreground="{StaticResource RedBrush}" FontSize="12" Opacity="0.85"/>
+                        <TextBlock Text="&#x2193; Incluye compras a crédito"
+                                   Foreground="{StaticResource RedBrush}" FontSize="12" Opacity="0.85"
+                                   TextWrapping="Wrap"/>
                     </StackPanel>
                 </Border>
             </Grid>

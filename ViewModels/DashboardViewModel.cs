@@ -42,6 +42,28 @@ public class DashboardViewModel : BaseViewModel
     public string BalanceTotalTexto => $"₡{_balanceTotal:N0}";
     public Brush  BalanceBrush      => _balanceTotal >= 0 ? BrushVerde : BrushRojo;
 
+    // ── Deuda de tarjetas ─────────────────────────────────────────────────────
+    // Va aparte del disponible a propósito: son dos cosas distintas y juntarlas en un
+    // único número es lo que hacía que el Dashboard no significara nada preciso.
+    private decimal _deudaTarjetas;
+
+    public decimal DeudaTarjetas
+    {
+        get => _deudaTarjetas;
+        private set
+        {
+            _deudaTarjetas = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(DeudaTarjetasTexto));
+            OnPropertyChanged(nameof(DeudaTarjetasVisibility));
+        }
+    }
+
+    public string DeudaTarjetasTexto => $"₡{_deudaTarjetas:N0}";
+
+    public Visibility DeudaTarjetasVisibility =>
+        _deudaTarjetas > 0 ? Visibility.Visible : Visibility.Collapsed;
+
     public decimal IngresosMes
     {
         get => _ingresosMes;
@@ -144,13 +166,18 @@ public class DashboardViewModel : BaseViewModel
         var todas    = _db.ObtenerTransacciones(_uid);
         var estesMes = todas.Where(t => t.Fecha >= inicio && t.Fecha <= fin).ToList();
 
-        // Excluir cargos a tarjeta de crédito: aún no son dinero real gastado
-        var todasEfectivas    = todas.Where(t => t.TarjetaCreditoId == null).ToList();
-        var estesMesEfectivos = estesMes.Where(t => t.TarjetaCreditoId == null).ToList();
+        // Los dos ejes de la decisión D2, que antes se mezclaban en un solo número:
+        //  · efectivo    → cuánto dinero hay realmente disponible
+        //  · presupuesto → en qué se gastó, aunque todavía no haya salido de la cuenta
+        var efectivoTodas   = todas.Where(t => t.AfectaEfectivo).ToList();
+        var presupuestoMes  = estesMes.Where(t => t.AfectaPresupuesto).ToList();
 
-        BalanceTotal = todasEfectivas.Sum(t => t.Tipo == "Ingreso" ? t.Monto : -t.Monto);
-        IngresosMes  = estesMesEfectivos.Where(t => t.Tipo == "Ingreso").Sum(t => t.Monto);
-        GastosMes    = estesMesEfectivos.Where(t => t.Tipo == "Gasto").Sum(t => t.Monto);
+        BalanceTotal = efectivoTodas.Sum(t => t.Tipo == "Ingreso" ? t.Monto : -t.Monto);
+        IngresosMes  = presupuestoMes.Where(t => t.Tipo == "Ingreso").Sum(t => t.Monto);
+        GastosMes    = presupuestoMes.Where(t => t.Tipo == "Gasto").Sum(t => t.Monto);
+
+        // Deuda de tarjetas: compras a crédito que todavía no se han pagado.
+        DeudaTarjetas = _db.ObtenerTarjetas(_uid).Sum(x => x.SaldoUsado);
 
         // Presupuesto mensual
         if (decimal.TryParse(_db.ObtenerConfig("presupuesto_mensual", "0"), out var pres))
@@ -194,7 +221,9 @@ public class DashboardViewModel : BaseViewModel
         };
 
         // Gráfica de torta
-        var grupos = estesMesEfectivos
+        // El gráfico de categorías usa el eje presupuesto: lo interesante es en qué gastaste,
+        // no cuándo salió el dinero de la cuenta.
+        var grupos = presupuestoMes
             .Where(t => t.Tipo == "Gasto")
             .GroupBy(t => t.Categoria)
             .ToDictionary(g => g.Key, g => (double)g.Sum(t => t.Monto));

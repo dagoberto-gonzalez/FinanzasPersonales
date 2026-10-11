@@ -9,6 +9,14 @@ public class Cuenta
     public string  Tipo         { get; set; } = "Cuenta corriente";
     public string  Banco        { get; set; } = string.Empty;
     public bool    Activa       { get; set; } = true;
+
+    /// <summary>Saldo de apertura: lo que había en la cuenta antes de la primera transacción.</summary>
+    public decimal SaldoInicial { get; set; }
+
+    /// <summary>
+    /// Calculado por <c>AppDatabase.ObtenerCuentas</c> como
+    /// <c>SaldoInicial + Σ transacciones</c>. No se almacena: asignarlo no persiste nada.
+    /// </summary>
     public decimal SaldoActual  { get; set; }
 
     public string EstadoTexto  => Activa ? "Activa" : "Inactiva";

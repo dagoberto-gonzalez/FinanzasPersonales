@@ -40,7 +40,7 @@
                               Visibility="{Binding CheckGlobalVisibility}"/>
                     <TextBlock Text="{Binding MensajeError}"
                                Foreground="{StaticResource RedBrush}"
-                               FontSize="12" Margin="0,10,0,0"
+                               FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
                                Visibility="{Binding MensajeErrorVisibility}"/>
                 </StackPanel>
             </Border>
@@ -54,56 +54,99 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Background="#2A2D3E" CornerRadius="8" Padding="14,10" Margin="0,0,0,6">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="8"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
+                                    <StackPanel>
 
-                                        <!-- Badge "Global" -->
-                                        <Border Grid.Column="0" CornerRadius="4" Padding="6,2"
-                                                Background="#3A3D52" Margin="0,0,8,0"
-                                                VerticalAlignment="Center">
-                                            <Border.Style>
-                                                <Style TargetType="Border">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding EsGlobal}" Value="True">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Border.Style>
-                                            <TextBlock Text="GLOBAL" FontSize="10" FontWeight="Bold"
-                                                       Foreground="{StaticResource AccentLightBrush}"/>
-                                        </Border>
+                                        <!-- ── Fila normal ── -->
+                                        <Grid Visibility="{Binding VistaVisibility}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
 
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{Binding Nombre}"
-                                                   FontSize="13" FontWeight="SemiBold"
-                                                   VerticalAlignment="Center"/>
+                                            <!-- Badge "Global" -->
+                                            <Border Grid.Column="0" CornerRadius="4" Padding="6,2"
+                                                    Background="#3A3D52" Margin="0,0,8,0"
+                                                    VerticalAlignment="Center">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding EsGlobal}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock Text="GLOBAL" FontSize="10" FontWeight="Bold"
+                                                           Foreground="{StaticResource AccentLightBrush}"/>
+                                            </Border>
 
-                                        <Button Grid.Column="2"
-                                                Content="Editar"
-                                                Style="{StaticResource SecondaryButton}"
-                                                Padding="12,4"
-                                                VerticalAlignment="Center"
-                                                Command="{Binding DataContext.SeleccionarCommand,
-                                                    RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                CommandParameter="{Binding}"/>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Nombre}"
+                                                       FontSize="13" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center"/>
 
-                                        <Button Grid.Column="4"
-                                                Content="✕"
-                                                Style="{StaticResource DangerButton}"
-                                                Padding="8,4"
-                                                VerticalAlignment="Center"
-                                                Command="{Binding DataContext.EliminarCommand,
-                                                    RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                CommandParameter="{Binding}"/>
-                                    </Grid>
+                                            <!-- Las de sistema, y las globales para un usuario
+                                                 normal, no ofrecen acciones: antes mostraban
+                                                 botones que sólo servían para dar un error. -->
+                                            <Button Grid.Column="2"
+                                                    Content="Editar"
+                                                    Style="{StaticResource SecondaryButton}"
+                                                    Padding="12,4"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="{Binding AccionesVisibility}"
+                                                    Command="{Binding EditarCommand}"/>
+
+                                            <Button Grid.Column="4"
+                                                    Content="✕"
+                                                    Style="{StaticResource DangerButton}"
+                                                    Padding="8,4"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="{Binding AccionesVisibility}"
+                                                    Command="{Binding EliminarCommand}"/>
+                                        </Grid>
+
+                                        <!-- ── La misma fila, en edición ── -->
+                                        <StackPanel Visibility="{Binding EdicionVisibility}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="8"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="8"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <TextBox Grid.Column="0"
+                                                         Text="{Binding NombreEditado, UpdateSourceTrigger=PropertyChanged}"
+                                                         Tag="Nuevo nombre"
+                                                         VerticalAlignment="Center"/>
+
+                                                <Button Grid.Column="2"
+                                                        Content="Guardar"
+                                                        Style="{StaticResource PrimaryButton}"
+                                                        Padding="16,6"
+                                                        VerticalAlignment="Center"
+                                                        Command="{Binding GuardarCommand}"/>
+
+                                                <Button Grid.Column="4"
+                                                        Content="Cancelar"
+                                                        Style="{StaticResource SecondaryButton}"
+                                                        Padding="14,6"
+                                                        VerticalAlignment="Center"
+                                                        Command="{Binding CancelarCommand}"/>
+                                            </Grid>
+
+                                            <TextBlock Text="{Binding MensajeError}"
+                                                       Foreground="{StaticResource RedBrush}"
+                                                       FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"
+                                                       Visibility="{Binding MensajeErrorVisibility}"/>
+                                        </StackPanel>
+
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -126,31 +169,11 @@
                 </StackPanel>
             </Border>
 
-            <!-- Panel de edición inline -->
-            <Border Style="{StaticResource Card}" Margin="0,20,0,0"
-                    Visibility="{Binding PuedeEditar, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
-                    <TextBlock FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12">
-                        <Run Text="Editar: "/>
-                        <Run Text="{Binding Seleccionada.Nombre}" Foreground="{StaticResource AccentBrush}"/>
-                    </TextBlock>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBox Grid.Column="0"
-                                 Text="{Binding EditNombre, UpdateSourceTrigger=PropertyChanged}"
-                                 Tag="Nuevo nombre"/>
-                        <Button Grid.Column="2"
-                                Content="Guardar"
-                                Style="{StaticResource PrimaryButton}"
-                                Command="{Binding GuardarEditCommand}"
-                                Padding="20,10"/>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <!-- Avisos de altas y bajas; los de edición salen dentro de su propia fila -->
+            <TextBlock Text="{Binding MensajeOk}"
+                       Foreground="{StaticResource GreenBrush}"
+                       FontSize="12" Margin="0,14,0,0" TextWrapping="Wrap"
+                       Visibility="{Binding MensajeOkVisibility}"/>
 
         </StackPanel>
     </ScrollViewer>

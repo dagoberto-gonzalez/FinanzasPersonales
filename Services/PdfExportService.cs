@@ -40,7 +40,10 @@ public static class PdfExportService
                     col.Item().Text($"Generado el {DateTime.Now:dd/MM/yyyy HH:mm}")
                         .FontSize(9).FontColor(Colors.Grey.Medium);
 
-                    var transAnio = transacciones.Where(t => t.Fecha.Year == anio).ToList();
+                    // Mismo eje que la pantalla de Reportes (presupuesto). Antes el PDF no
+                    // filtraba nada, así que el mismo año exportado daba otras cifras.
+                    var transAnio = transacciones
+                        .Where(t => t.Fecha.Year == anio && t.AfectaPresupuesto).ToList();
                     var ingresos  = transAnio.Where(t => t.Tipo == "Ingreso").Sum(t => t.Monto);
                     var gastos    = transAnio.Where(t => t.Tipo == "Gasto").Sum(t => t.Monto);
                     var balance   = ingresos - gastos;

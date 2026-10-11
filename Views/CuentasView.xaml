@@ -26,6 +26,8 @@
                             <ColumnDefinition Width="12"/>
                             <ColumnDefinition Width="200"/>
                             <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="12"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
@@ -50,7 +52,14 @@
                                      Tag="Ej. BAC San José"/>
                         </StackPanel>
 
-                        <Button Grid.Column="6"
+                        <StackPanel Grid.Column="6">
+                            <TextBlock Text="Saldo inicial" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding NuevoSaldoInicial, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="₡ 0"/>
+                        </StackPanel>
+
+                        <Button Grid.Column="8"
                                 Content="Agregar"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding AgregarCommand}"
@@ -163,7 +172,16 @@
                                    FontSize="12" Margin="0,0,0,5"/>
                         <TextBox Text="{Binding EditBanco, UpdateSourceTrigger=PropertyChanged}"
                                  Tag="Opcional"
-                                 Margin="0,0,0,16"/>
+                                 Margin="0,0,0,12"/>
+
+                        <TextBlock Text="Saldo inicial" Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="12" Margin="0,0,0,5"/>
+                        <TextBox Text="{Binding EditSaldoInicial, UpdateSourceTrigger=PropertyChanged}"
+                                 Tag="₡ 0"
+                                 Margin="0,0,0,4"/>
+                        <TextBlock Text="El saldo mostrado es este valor más las transacciones. Ajústalo si la cuenta no cuadra con el banco."
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
                         <CheckBox Content="Cuenta activa"
                                   IsChecked="{Binding EditActiva}"

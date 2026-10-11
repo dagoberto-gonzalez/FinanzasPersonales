@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using FinanzasPersonales.Data;
 using FinanzasPersonales.Models;
+using FinanzasPersonales.Services;
 
 namespace FinanzasPersonales.ViewModels;
 
@@ -117,12 +117,23 @@ public class TarjetasViewModel : BaseViewModel
         string.IsNullOrEmpty(_nuevaError) ? Visibility.Collapsed : Visibility.Visible;
 
     // ── Abono ─────────────────────────────────────────────────────────────────
-    private string _abonoMonto = string.Empty;
+    private string  _abonoMonto = string.Empty;
+    private Cuenta? _cuentaAbono;
+
     public string AbonoMonto
     {
         get => _abonoMonto;
         set { _abonoMonto = value; OnPropertyChanged(); }
     }
+
+    /// <summary>Cuenta de la que sale el pago. Si es null, el abono se registra como efectivo.</summary>
+    public Cuenta? CuentaAbono
+    {
+        get => _cuentaAbono;
+        set { _cuentaAbono = value; OnPropertyChanged(); }
+    }
+
+    public ObservableCollection<Cuenta> CuentasDisponibles { get; } = [];
 
     // ── Colecciones ───────────────────────────────────────────────────────────
     public ObservableCollection<TarjetaCredito> Tarjetas    { get; } = [];
@@ -155,6 +166,14 @@ public class TarjetasViewModel : BaseViewModel
         foreach (var t in lista)
             Tarjetas.Add(t);
 
+        var prevCuentaId = _cuentaAbono?.Id;
+        CuentasDisponibles.Clear();
+        foreach (var c in _db.ObtenerCuentas(_uid).Where(c => c.Activa))
+            CuentasDisponibles.Add(c);
+        CuentaAbono = prevCuentaId.HasValue
+            ? CuentasDisponibles.FirstOrDefault(c => c.Id == prevCuentaId)
+            : CuentasDisponibles.FirstOrDefault();
+
         if (prevId.HasValue)
             Seleccionada = Tarjetas.FirstOrDefault(t => t.Id == prevId);
     }
@@ -179,9 +198,8 @@ public class TarjetasViewModel : BaseViewModel
             return;
         }
 
-        // Parsear límite (puede tener separadores de miles)
-        var limStr = _editLimite.Replace(".", "").Replace(",", "");
-        if (!decimal.TryParse(limStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var limite) || limite <= 0)
+        // El campo llega pre-rellenado con ToString("N0"), o sea con separadores de miles.
+        if (!Dinero.TryParsePositivo(_editLimite, out var limite))
         {
             MensajeError = "Límite de crédito inválido.";
             return;
@@ -218,8 +236,7 @@ public class TarjetasViewModel : BaseViewModel
             return;
         }
 
-        var limStr = _nuevaLimite.Replace(".", "").Replace(",", "");
-        if (!decimal.TryParse(limStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var limite) || limite <= 0)
+        if (!Dinero.TryParsePositivo(_nuevaLimite, out var limite))
         {
             NuevaError = "Límite inválido.";
             return;
@@ -255,15 +272,38 @@ public class TarjetasViewModel : BaseViewModel
     private void EliminarTarjeta(TarjetaCredito? t)
     {
         if (t is null) return;
+        MensajeError = string.Empty;
+        MensajeOk    = string.Empty;
+
+        // Las transacciones de una tarjeta sólo se consultan a través de ella: al borrarla
+        // quedarían guardadas pero inalcanzables desde la interfaz.
+        var movimientos = _db.ContarMovimientosDeTarjeta(t.Id);
+        if (movimientos > 0)
+        {
+            MensajeError =
+                $"\"{t.Nombre}\" tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} " +
+                "registrado" + (movimientos == 1 ? "" : "s") + ". Eliminarla dejaría esas " +
+                "transacciones sin forma de consultarse.";
+            return;
+        }
+
         var res = System.Windows.MessageBox.Show(
             $"¿Eliminar la tarjeta \"{t.Nombre}\"? Esta acción no se puede deshacer.",
             "Confirmar eliminación",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning);
         if (res != System.Windows.MessageBoxResult.Yes) return;
-        _db.EliminarTarjeta(t.Id);
-        if (_seleccionada?.Id == t.Id) Seleccionada = null;
-        Cargar();
+
+        try
+        {
+            _db.EliminarTarjeta(t.Id);
+            if (_seleccionada?.Id == t.Id) Seleccionada = null;
+            Cargar();
+        }
+        catch (InvalidOperationException ex)
+        {
+            MensajeError = ex.Message;
+        }
     }
 
     private void Abonar()
@@ -271,14 +311,16 @@ public class TarjetasViewModel : BaseViewModel
         if (_seleccionada is null) return;
         MensajeError = string.Empty;
 
-        var montoStr = _abonoMonto.Replace(".", "").Replace(",", "");
-        if (!decimal.TryParse(montoStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var monto) || monto <= 0)
+        if (!Dinero.TryParsePositivo(_abonoMonto, out var monto))
         {
             MensajeError = "Monto de abono inválido.";
             return;
         }
 
-        // Registrar pago como transacción (reduce balance real)
+        // El pago sale de una cuenta concreta. Antes venía fijo como "Banco BAC" y con
+        // CuentaId nulo, así que bajaba el balance global sin descontar de ninguna cuenta.
+        var cuenta = _cuentaAbono;
+
         _db.InsertarTransaccion(new Transaccion
         {
             Tipo             = "Gasto",
@@ -287,13 +329,13 @@ public class TarjetasViewModel : BaseViewModel
             Descripcion      = $"Pago tarjeta {_seleccionada.Nombre}",
             Notas            = "Abono registrado manualmente",
             Fecha            = DateTime.Today,
-            CuentaNombre     = "Banco BAC",
-            TarjetaCreditoId = null
+            CuentaNombre     = cuenta?.Nombre ?? "Efectivo",
+            CuentaId         = cuenta?.Id,
+            TarjetaCreditoId = null,                    // no es una compra con la tarjeta…
+            PagoDeTarjetaId  = _seleccionada.Id         // …es el pago que la salda
         }, _uid);
 
-        // Reducir saldo usado directamente
-        _db.AbonarTarjeta(_seleccionada.Id, monto);
-
+        // No hay nada más que hacer: el saldo de la tarjeta sale de esta misma transacción.
         AbonoMonto = string.Empty;
         Cargar();
     }

@@ -75,7 +75,7 @@ public static class PdfLaboralService
                                 cell.Text(valor).Bold();
                         }
 
-                        Fila("Salario por hora",   $"₡{salarioPorHora:N0}");
+                        Fila("Valor de la hora",   $"₡{salarioPorHora:N2}");
                         Fila("Jornada semanal",    $"{jornadaSemanal} horas");
                         Fila("Salario bruto",       $"₡{salarioBruto:N0}", Colors.Black);
                         Fila("Deducción CCSS (10.67%)", $"₡{deducciones:N0}", Colors.Red.Darken1);

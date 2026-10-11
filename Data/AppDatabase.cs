@@ -10,19 +10,55 @@ public class AppDatabase
 {
     private readonly string _cs;
 
-    public AppDatabase()
+    /// <summary>Ruta del archivo SQLite en uso (útil para diagnóstico y pruebas).</summary>
+    public string RutaArchivo { get; }
+
+    /// <summary>
+    /// Abre (o crea) la base de datos.
+    /// </summary>
+    /// <param name="dbPath">
+    /// Ruta completa del archivo .db. Si es <c>null</c> se usa la ubicación de producción
+    /// (<c>%APPDATA%\FinanzasPersonales\finanzas.db</c>). Las pruebas pasan una ruta temporal.
+    /// </param>
+    public AppDatabase(string? dbPath = null)
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "FinanzasPersonales");
-        Directory.CreateDirectory(dir);
-        _cs = $"Data Source={Path.Combine(dir, "finanzas.db")}";
+        if (string.IsNullOrWhiteSpace(dbPath))
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "FinanzasPersonales");
+            Directory.CreateDirectory(dir);
+            dbPath = Path.Combine(dir, "finanzas.db");
+        }
+        else
+        {
+            var dir = Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        }
+
+        RutaArchivo = dbPath;
+        _cs         = $"Data Source={dbPath}";
         Inicializar();
     }
 
     // ── Utilidades ────────────────────────────────────────────────────────────
 
-    private SqliteConnection Abrir() { var c = new SqliteConnection(_cs); c.Open(); return c; }
+    /// <summary>
+    /// Abre una conexión con las claves foráneas activadas. SQLite las trae desactivadas por
+    /// compatibilidad y el ajuste es por conexión, no por base: sin esta línea las claves
+    /// declaradas en el esquema no se comprobarían nunca.
+    /// </summary>
+    private SqliteConnection Abrir()
+    {
+        var c = new SqliteConnection(_cs);
+        c.Open();
+        using (var pragma = c.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA foreign_keys=ON";
+            pragma.ExecuteNonQuery();
+        }
+        return c;
+    }
 
     public static string Hash(string text)
     {
@@ -159,6 +195,14 @@ public class AppDatabase
         MigrarCategorias(conn);
         // Migración mono→multi usuario
         MigrarAMultiUsuario(conn);
+        // Claves foráneas: recrea las tablas, así que va después de todas las migraciones
+        // de columnas y antes de los índices (que se pierden al recrear).
+        MigrarAClavesForaneas(conn);
+        // Después de las claves foráneas: aquella migración recrea las tablas con una lista fija
+        // de columnas y perdería las que se añaden aquí.
+        MigrarComprobantesDePago(conn);
+        // Índices (al final: dependen de columnas que crean las migraciones anteriores)
+        CrearIndices(conn);
         // Datos globales iniciales
         SeedConfiguracion(conn);
     }
@@ -175,18 +219,69 @@ public class AppDatabase
                     Tipo         TEXT    NOT NULL DEFAULT 'Débito',
                     Banco        TEXT    NOT NULL DEFAULT '',
                     Activa       INTEGER NOT NULL DEFAULT 1,
-                    SaldoActual  REAL    NOT NULL DEFAULT 0,
+                    SaldoInicial REAL    NOT NULL DEFAULT 0,
                     UNIQUE(UsuarioId, Nombre)
                 )
                 """);
         }
     }
 
+    /// <summary>
+    /// El saldo de una cuenta dejó de ser un contador que se actualizaba a mano en diez sitios
+    /// distintos y pasó a calcularse: <c>SaldoInicial + Σ transacciones de la cuenta</c>.
+    /// Esta migración conserva el valor acumulado que hubiera, convirtiéndolo en saldo inicial
+    /// sólo cuando no puede derivarse de las transacciones existentes.
+    /// </summary>
     private static void MigrarCuentas(SqliteConnection conn)
     {
         var cols = GetColumnas(conn, "Cuentas");
-        if (!cols.Contains("SaldoActual"))
-            AddColumna(conn, "Cuentas", "SaldoActual", "REAL NOT NULL DEFAULT 0");
+
+        if (!cols.Contains("SaldoInicial"))
+        {
+            AddColumna(conn, "Cuentas", "SaldoInicial", "REAL NOT NULL DEFAULT 0");
+
+            // Si venía del esquema anterior, el saldo acumulado que tuviera la cuenta y que NO
+            // se explique por sus transacciones es, por definición, su saldo de apertura.
+            // Ojo: esto corre antes que MigrarTransacciones, así que CuentaId puede no existir
+            // todavía; en ese caso no hay nada que descontar y el acumulado ES el saldo inicial.
+            var transCols = TablaExiste(conn, "Transacciones")
+                ? GetColumnas(conn, "Transacciones")
+                : [];
+
+            if (cols.Contains("SaldoActual") && !transCols.Contains("CuentaId"))
+            {
+                EjecutarNonQuery(conn, "UPDATE Cuentas SET SaldoInicial = SaldoActual");
+            }
+            else if (cols.Contains("SaldoActual"))
+            {
+                EjecutarNonQuery(conn, """
+                    UPDATE Cuentas SET SaldoInicial = SaldoActual - COALESCE(
+                        (SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
+                         FROM Transacciones t WHERE t.CuentaId = Cuentas.Id), 0)
+                    """);
+            }
+        }
+
+        // SaldoActual ya no se escribe nunca: dejarla sería una columna permanentemente obsoleta
+        // que alguien acabaría leyendo. Si el motor no admite DROP COLUMN se ignora sin más.
+        if (cols.Contains("SaldoActual"))
+        {
+            try { EjecutarNonQuery(conn, "ALTER TABLE Cuentas DROP COLUMN SaldoActual"); }
+            catch (SqliteException) { /* queda huérfana pero nadie la lee */ }
+        }
+    }
+
+    /// <summary>
+    /// Índices. El esquema no tenía ninguno; al derivar los saldos, cada lectura de cuentas
+    /// hace un SUM sobre Transacciones y conviene que no sea un recorrido completo.
+    /// </summary>
+    private static void CrearIndices(SqliteConnection conn)
+    {
+        EjecutarNonQuery(conn, """
+            CREATE INDEX IF NOT EXISTS IX_Transacciones_CuentaId   ON Transacciones(CuentaId);
+            CREATE INDEX IF NOT EXISTS IX_Transacciones_TarjetaId  ON Transacciones(TarjetaCreditoId);
+            CREATE INDEX IF NOT EXISTS IX_Transacciones_UsuarioFecha ON Transacciones(UsuarioId, Fecha);
+            """);
     }
 
     private static void InicializarTarjetasCredito(SqliteConnection conn)
@@ -199,10 +294,8 @@ public class AppDatabase
                     UsuarioId        INTEGER NOT NULL DEFAULT 1,
                     Nombre           TEXT    NOT NULL,
                     LimiteCredito    REAL    NOT NULL DEFAULT 0,
-                    SaldoUsado       REAL    NOT NULL DEFAULT 0,
                     DiaCierre        INTEGER NOT NULL DEFAULT 15,
                     DiaPago          INTEGER NOT NULL DEFAULT 5,
-                    FechaUltimoCorte TEXT    NOT NULL DEFAULT '',
                     UNIQUE(UsuarioId, Nombre)
                 )
                 """);
@@ -212,10 +305,6 @@ public class AppDatabase
     private static void MigrarTarjetas(SqliteConnection conn)
     {
         var cols = GetColumnas(conn, "TarjetasCredito");
-
-        // Agregar FechaUltimoCorte si no existe (versión vieja)
-        if (!cols.Contains("FechaUltimoCorte"))
-            AddColumna(conn, "TarjetasCredito", "FechaUltimoCorte", "TEXT NOT NULL DEFAULT ''");
 
         // Si no tiene UsuarioId necesitamos recrear (para quitar UNIQUE(Nombre) y agregar UsuarioId)
         if (!cols.Contains("UsuarioId"))
@@ -246,6 +335,19 @@ public class AppDatabase
                 tr.Commit();
             }
             catch { tr.Rollback(); throw; }
+        }
+
+        // Decisión D3: SaldoUsado pasó a calcularse (compras − pagos) y FechaUltimoCorte dejó
+        // de tener sentido, porque el inicio del período sale de DiaCierre. Dejarlas sería
+        // arrastrar dos columnas permanentemente obsoletas que alguien acabaría leyendo.
+        // Va al final y releyendo las columnas: el bloque de arriba puede haber recreado la
+        // tabla con el esquema antiguo.
+        var actuales = GetColumnas(conn, "TarjetasCredito");
+        foreach (var obsoleta in new[] { "SaldoUsado", "FechaUltimoCorte" })
+        {
+            if (!actuales.Contains(obsoleta)) continue;
+            try { EjecutarNonQuery(conn, $"ALTER TABLE TarjetasCredito DROP COLUMN {obsoleta}"); }
+            catch (SqliteException) { /* el motor no admite DROP COLUMN; nadie la lee */ }
         }
     }
 
@@ -323,6 +425,28 @@ public class AppDatabase
         if (!cols.Contains("TarjetaCreditoId")) AddColumna(conn, "Transacciones", "TarjetaCreditoId", "INTEGER");
         if (!cols.Contains("UsuarioId"))        AddColumna(conn, "Transacciones", "UsuarioId",        "INTEGER NOT NULL DEFAULT 1");
         if (!cols.Contains("CuentaId"))         AddColumna(conn, "Transacciones", "CuentaId",         "INTEGER");
+
+        // Decisión D2: qué tarjeta salda este pago. Distingue "compré con la tarjeta" (gasto
+        // que aún no mueve efectivo) de "pagué la tarjeta" (mueve efectivo pero no es un gasto
+        // nuevo: ya se contó al comprar). Antes esto se adivinaba mirando si la categoría decía
+        // "Tarjeta", que es frágil.
+        if (!cols.Contains("PagoDeTarjetaId"))
+        {
+            AddColumna(conn, "Transacciones", "PagoDeTarjetaId", "INTEGER");
+
+            // Los pagos que ya existían los generó TarjetasViewModel.Abonar con una descripción
+            // exacta; sin esto se contarían dos veces (la compra y el pago).
+            EjecutarNonQuery(conn, """
+                UPDATE Transacciones
+                SET PagoDeTarjetaId = (
+                    SELECT tc.Id FROM TarjetasCredito tc
+                    WHERE tc.UsuarioId = Transacciones.UsuarioId
+                      AND Transacciones.Descripcion = 'Pago tarjeta ' || tc.Nombre)
+                WHERE Tipo = 'Gasto' AND Categoria = 'Tarjeta'
+                  AND TarjetaCreditoId IS NULL
+                  AND Descripcion LIKE 'Pago tarjeta %'
+                """);
+        }
     }
 
     private static void MigrarMetasAhorro(SqliteConnection conn)
@@ -421,13 +545,352 @@ public class AppDatabase
         // Nota: SQLite trata NULL != NULL en UNIQUE, así que INSERT OR IGNORE no evita duplicados
         // cuando UsuarioId es NULL. Usamos WHERE NOT EXISTS para verificar antes de insertar.
         var cats = new[] { "Alimentación", "Transporte", "Salud", "Entretenimiento",
-                           "Educación", "Servicios", "Hogar", "Ropa", "Tecnología", "Otros" };
+                           "Educación", "Servicios", "Hogar", "Ropa", "Tecnología", "Otros" }
+                   .Concat(CategoriasSistema);
         foreach (var c in cats)
             EjecutarNonQuery(conn,
                 "INSERT INTO Categorias (UsuarioId, Nombre) SELECT NULL,$n WHERE NOT EXISTS (SELECT 1 FROM Categorias WHERE UsuarioId IS NULL AND Nombre=$n)",
                 ("$n", c));
     }
 
+
+    // ── Claves foráneas (Bloque 3) ────────────────────────────────────────────
+
+    /// <summary>
+    /// Declara las claves foráneas del esquema. SQLite no permite añadirlas con ALTER TABLE, así
+    /// que hay que recrear cada tabla copiando los datos.
+    /// <para>
+    /// Qué gana: que el motor impida las filas huérfanas en vez de depender de que cada borrado
+    /// esté bien escrito. En particular <c>ON DELETE CASCADE</c> sobre <c>UsuarioId</c> hace que
+    /// eliminar un usuario limpie todo solo — antes era una lista de tablas a mano, y se habían
+    /// olvidado seis.
+    /// </para>
+    /// <para>
+    /// Las acciones expresan las reglas que ya aplica la aplicación:
+    /// <list type="bullet">
+    /// <item><c>CASCADE</c> en UsuarioId — los datos de un usuario mueren con él.</item>
+    /// <item><c>RESTRICT</c> en cuenta y tarjeta de una transacción — no se borra algo que tiene
+    /// movimientos; para dejar de verlo se desactiva.</item>
+    /// <item><c>SET NULL</c> en las referencias opcionales a una transacción o cuenta — la fila
+    /// sobrevive sin el vínculo.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// No se puede declarar <c>PagosMensuales.FijoId</c>: apunta a GastosFijos o a IngresosFijos
+    /// según <c>TipoFijo</c>, y una clave foránea no admite dos destinos. Eso lo cubren
+    /// <c>EliminarGastoFijo</c>/<c>EliminarIngresoFijo</c> y el verificador.
+    /// </para>
+    /// </summary>
+    private static void MigrarAClavesForaneas(SqliteConnection conn)
+    {
+        if (TieneClavesForaneas(conn, "Transacciones")) return;
+
+        LimpiarHuerfanosPrevios(conn);
+
+        // Procedimiento recomendado por SQLite para cambiar el esquema de una tabla.
+        // legacy_alter_table evita que el RENAME reescriba las referencias de otras tablas.
+        EjecutarNonQuery(conn, "PRAGMA foreign_keys=OFF");
+        EjecutarNonQuery(conn, "PRAGMA legacy_alter_table=ON");
+
+        using var tr = conn.BeginTransaction();
+        try
+        {
+            Recrear(conn, "Cuentas",
+                """
+                CREATE TABLE Cuentas__fk (
+                    Id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId    INTEGER NOT NULL,
+                    Nombre       TEXT    NOT NULL,
+                    Tipo         TEXT    NOT NULL DEFAULT 'Débito',
+                    Banco        TEXT    NOT NULL DEFAULT '',
+                    Activa       INTEGER NOT NULL DEFAULT 1,
+                    SaldoInicial REAL    NOT NULL DEFAULT 0,
+                    UNIQUE(UsuarioId, Nombre),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial");
+
+            Recrear(conn, "TarjetasCredito",
+                """
+                CREATE TABLE TarjetasCredito__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL DEFAULT 1,
+                    Nombre        TEXT    NOT NULL,
+                    LimiteCredito REAL    NOT NULL DEFAULT 0,
+                    DiaCierre     INTEGER NOT NULL DEFAULT 15,
+                    DiaPago       INTEGER NOT NULL DEFAULT 5,
+                    UNIQUE(UsuarioId, Nombre),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, LimiteCredito, DiaCierre, DiaPago");
+
+            Recrear(conn, "Categorias",
+                """
+                CREATE TABLE Categorias__fk (
+                    Id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId INTEGER,
+                    Nombre    TEXT NOT NULL,
+                    UNIQUE(UsuarioId, Nombre),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre");
+
+            Recrear(conn, "Transacciones",
+                """
+                CREATE TABLE Transacciones__fk (
+                    Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId        INTEGER NOT NULL DEFAULT 1,
+                    Tipo             TEXT    NOT NULL,
+                    Monto            REAL    NOT NULL,
+                    Categoria        TEXT    NOT NULL,
+                    Descripcion      TEXT    NOT NULL DEFAULT '',
+                    Fecha            TEXT    NOT NULL,
+                    Notas            TEXT    NOT NULL DEFAULT '',
+                    CuentaNombre     TEXT    NOT NULL DEFAULT 'Efectivo',
+                    TarjetaCreditoId INTEGER,
+                    CuentaId         INTEGER,
+                    PagoDeTarjetaId  INTEGER,
+                    FOREIGN KEY (UsuarioId)        REFERENCES Usuarios(Id)        ON DELETE CASCADE,
+                    FOREIGN KEY (CuentaId)         REFERENCES Cuentas(Id)         ON DELETE RESTRICT,
+                    FOREIGN KEY (TarjetaCreditoId) REFERENCES TarjetasCredito(Id) ON DELETE RESTRICT,
+                    FOREIGN KEY (PagoDeTarjetaId)  REFERENCES TarjetasCredito(Id) ON DELETE RESTRICT
+                )
+                """,
+                "Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, TarjetaCreditoId, CuentaId, PagoDeTarjetaId");
+
+            Recrear(conn, "MetasAhorro",
+                """
+                CREATE TABLE MetasAhorro__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL DEFAULT 1,
+                    Nombre        TEXT    NOT NULL,
+                    MontoObjetivo REAL    NOT NULL,
+                    MontoActual   REAL    NOT NULL DEFAULT 0,
+                    FechaLimite   TEXT    NOT NULL,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite");
+
+            Recrear(conn, "GastosFijos",
+                """
+                CREATE TABLE GastosFijos__fk (
+                    Id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId       INTEGER NOT NULL DEFAULT 1,
+                    Nombre          TEXT    NOT NULL,
+                    Monto           REAL    NOT NULL,
+                    DiaVencimiento  INTEGER NOT NULL,
+                    DiaVencimiento2 INTEGER NOT NULL DEFAULT 0,
+                    Activo          INTEGER NOT NULL DEFAULT 1,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Nombre, Monto, DiaVencimiento, DiaVencimiento2, Activo");
+
+            Recrear(conn, "IngresosFijos",
+                """
+                CREATE TABLE IngresosFijos__fk (
+                    Id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId   INTEGER NOT NULL DEFAULT 1,
+                    Nombre      TEXT    NOT NULL,
+                    Monto       REAL    NOT NULL,
+                    DiaIngreso  INTEGER NOT NULL,
+                    DiaIngreso2 INTEGER NOT NULL DEFAULT 0,
+                    Activo      INTEGER NOT NULL DEFAULT 1,
+                    CuentaId    INTEGER,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE,
+                    FOREIGN KEY (CuentaId)  REFERENCES Cuentas(Id)  ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, Nombre, Monto, DiaIngreso, DiaIngreso2, Activo, CuentaId");
+
+            Recrear(conn, "PagosMensuales",
+                """
+                CREATE TABLE PagosMensuales__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL DEFAULT 1,
+                    TipoFijo      TEXT    NOT NULL,
+                    FijoId        INTEGER NOT NULL,
+                    Anio          INTEGER NOT NULL,
+                    Mes           INTEGER NOT NULL,
+                    Dia           INTEGER NOT NULL DEFAULT 1,
+                    Pagado        INTEGER NOT NULL DEFAULT 0,
+                    MetodoPago    TEXT    NOT NULL DEFAULT '',
+                    TransaccionId INTEGER,
+                    UNIQUE(UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia),
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado, MetodoPago, TransaccionId");
+
+            Recrear(conn, "ConfiguracionLaboral",
+                """
+                CREATE TABLE ConfiguracionLaboral__fk (
+                    UsuarioId      INTEGER PRIMARY KEY,
+                    SalarioPorHora REAL    NOT NULL DEFAULT 0,
+                    JornadaSemanal REAL    NOT NULL DEFAULT 48,
+                    DiaPago        INTEGER NOT NULL DEFAULT 15,
+                    ModoPago       TEXT    NOT NULL DEFAULT 'Mensual',
+                    DiaPago2       INTEGER NOT NULL DEFAULT 0,
+                    DiaSemana      INTEGER NOT NULL DEFAULT 5,
+                    Viaticos       REAL    NOT NULL DEFAULT 0,
+                    DiasPorSemana       INTEGER NOT NULL DEFAULT 5,
+                    PorcentajeDeduccion REAL    NOT NULL DEFAULT 10.83,
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos, DiasPorSemana, PorcentajeDeduccion");
+
+            Recrear(conn, "RegistrosDiasLaborales",
+                """
+                CREATE TABLE RegistrosDiasLaborales__fk (
+                    Id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId           INTEGER NOT NULL,
+                    Fecha               TEXT    NOT NULL,
+                    HorasNormales       REAL    NOT NULL DEFAULT 0,
+                    HorasExtraDiurnas   REAL    NOT NULL DEFAULT 0,
+                    HorasExtraNocturnas REAL    NOT NULL DEFAULT 0,
+                    HorasDobles         REAL    NOT NULL DEFAULT 0,
+                    EsFeriado           INTEGER NOT NULL DEFAULT 0,
+                    HorasAusencia       REAL    NOT NULL DEFAULT 0,
+                    TieneGoceSalario    INTEGER NOT NULL DEFAULT 0,
+                    Viaticos            REAL    NOT NULL DEFAULT 0,
+                    UNIQUE(UsuarioId, Fecha),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas, HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario, Viaticos");
+
+            Recrear(conn, "PeriodosLaborales",
+                """
+                CREATE TABLE PeriodosLaborales__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL,
+                    FechaInicio   TEXT    NOT NULL,
+                    FechaFin      TEXT    NOT NULL,
+                    SalarioBruto  REAL    NOT NULL DEFAULT 0,
+                    Deducciones   REAL    NOT NULL DEFAULT 0,
+                    SalarioNeto   REAL    NOT NULL DEFAULT 0,
+                    Cerrado       INTEGER NOT NULL DEFAULT 0,
+                    TransaccionId INTEGER,
+                    Notas         TEXT    NOT NULL DEFAULT '',
+                    UNIQUE(UsuarioId, FechaInicio),
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId, Notas");
+
+            Recrear(conn, "IngresoLaboralDirecto",
+                """
+                CREATE TABLE IngresoLaboralDirecto__fk (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL,
+                    Fecha         TEXT    NOT NULL,
+                    Monto         REAL    NOT NULL DEFAULT 0,
+                    Descripcion   TEXT    NOT NULL DEFAULT '',
+                    CuentaId      INTEGER,
+                    TransaccionId INTEGER,
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (CuentaId)      REFERENCES Cuentas(Id)       ON DELETE SET NULL,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """,
+                "Id, UsuarioId, Fecha, Monto, Descripcion, CuentaId, TransaccionId");
+
+            Recrear(conn, "ResumenMensual",
+                """
+                CREATE TABLE ResumenMensual__fk (
+                    Id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId        INTEGER NOT NULL,
+                    Anio             INTEGER NOT NULL,
+                    Mes              INTEGER NOT NULL,
+                    Ingresos         REAL    NOT NULL DEFAULT 0,
+                    Gastos           REAL    NOT NULL DEFAULT 0,
+                    Balance          REAL    NOT NULL DEFAULT 0,
+                    BalanceAcumulado REAL    NOT NULL DEFAULT 0,
+                    NumTransacciones INTEGER NOT NULL DEFAULT 0,
+                    PeriodoLaboral   INTEGER NOT NULL DEFAULT 0,
+                    FechaCierre      TEXT    NOT NULL DEFAULT '',
+                    Notas            TEXT    NOT NULL DEFAULT '',
+                    UNIQUE(UsuarioId, Anio, Mes),
+                    FOREIGN KEY (UsuarioId) REFERENCES Usuarios(Id) ON DELETE CASCADE
+                )
+                """,
+                "Id, UsuarioId, Anio, Mes, Ingresos, Gastos, Balance, BalanceAcumulado, NumTransacciones, PeriodoLaboral, FechaCierre, Notas");
+
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
+        finally
+        {
+            EjecutarNonQuery(conn, "PRAGMA legacy_alter_table=OFF");
+            EjecutarNonQuery(conn, "PRAGMA foreign_keys=ON");
+        }
+    }
+
+    private static bool TieneClavesForaneas(SqliteConnection conn, string tabla)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_foreign_key_list('{tabla}')";
+        return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L) > 0;
+    }
+
+    /// <summary>
+    /// Copia una tabla a una nueva con claves foráneas y la deja con el nombre original.
+    /// Las columnas se nombran explícitamente: un <c>SELECT *</c> se rompería en cuanto el
+    /// orden difiriera entre la tabla vieja y la nueva.
+    /// </summary>
+    private static void Recrear(SqliteConnection conn, string tabla, string ddl, string columnas)
+    {
+        EjecutarNonQuery(conn, ddl);
+        EjecutarNonQuery(conn, $"INSERT INTO {tabla}__fk ({columnas}) SELECT {columnas} FROM {tabla}");
+        EjecutarNonQuery(conn, $"DROP TABLE {tabla}");
+        EjecutarNonQuery(conn, $"ALTER TABLE {tabla}__fk RENAME TO {tabla}");
+    }
+
+    /// <summary>
+    /// Las filas que ya estuvieran rotas violarían las claves nuevas nada más declararlas, así
+    /// que se sanean antes: se desvinculan las referencias muertas y se borran los datos de
+    /// usuarios que ya no existen.
+    /// </summary>
+    private static void LimpiarHuerfanosPrevios(SqliteConnection conn)
+    {
+        EjecutarNonQuery(conn, """
+            UPDATE Transacciones SET CuentaId = NULL
+             WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas);
+            UPDATE Transacciones SET TarjetaCreditoId = NULL
+             WHERE TarjetaCreditoId IS NOT NULL AND TarjetaCreditoId NOT IN (SELECT Id FROM TarjetasCredito);
+            UPDATE Transacciones SET PagoDeTarjetaId = NULL
+             WHERE PagoDeTarjetaId IS NOT NULL AND PagoDeTarjetaId NOT IN (SELECT Id FROM TarjetasCredito);
+            UPDATE IngresosFijos SET CuentaId = NULL
+             WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas);
+            UPDATE IngresoLaboralDirecto SET CuentaId = NULL
+             WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas);
+            """);
+
+        // Un pago que dice estar pagado pero cuya transacción ya no existe, no estaba pagado.
+        EjecutarNonQuery(conn, """
+            UPDATE PagosMensuales SET TransaccionId = NULL, Pagado = 0, MetodoPago = ''
+             WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones);
+            UPDATE PeriodosLaborales SET TransaccionId = NULL
+             WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones);
+            UPDATE IngresoLaboralDirecto SET TransaccionId = NULL
+             WHERE TransaccionId IS NOT NULL AND TransaccionId NOT IN (SELECT Id FROM Transacciones);
+            """);
+
+        // Filas de usuarios eliminados: con CASCADE no volverán a aparecer.
+        foreach (var tabla in TablasPorUsuario)
+        {
+            var filtro = tabla == "Categorias" ? "UsuarioId IS NOT NULL AND " : "";
+            EjecutarNonQuery(conn,
+                $"DELETE FROM {tabla} WHERE {filtro}UsuarioId NOT IN (SELECT Id FROM Usuarios)");
+        }
+    }
     // ── Usuarios ──────────────────────────────────────────────────────────────
 
     public Usuario? ValidarCredenciales(string nombreUsuario, string password)
@@ -526,18 +989,31 @@ public class AppDatabase
             ("$a", activo ? 1 : 0), ("$id", usuarioId));
     }
 
+    /// <summary>
+    /// Tablas con datos propios de un usuario. Tenerlas en un solo sitio evita que al añadir
+    /// una tabla nueva se olvide de limpiarla: antes se borraban 7 de 13 y las otras 6 quedaban
+    /// como filas huérfanas, mientras el diálogo prometía eliminar "todos sus datos".
+    /// </summary>
+    private static readonly string[] TablasPorUsuario =
+    [
+        "Transacciones", "MetasAhorro", "TarjetasCredito", "GastosFijos", "IngresosFijos",
+        "PagosMensuales", "Categorias", "Cuentas", "ConfiguracionLaboral",
+        "RegistrosDiasLaborales", "PeriodosLaborales", "IngresoLaboralDirecto", "ResumenMensual"
+    ];
+
     public void EliminarUsuario(int usuarioId)
     {
         using var conn = Abrir();
-        // Eliminar todos los datos del usuario
-        EjecutarNonQuery(conn, "DELETE FROM Transacciones   WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM MetasAhorro     WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM TarjetasCredito WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM GastosFijos     WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM IngresosFijos   WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM PagosMensuales  WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM Categorias      WHERE UsuarioId=$id", ("$id", usuarioId));
-        EjecutarNonQuery(conn, "DELETE FROM Usuarios        WHERE Id=$id",        ("$id", usuarioId));
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            foreach (var tabla in TablasPorUsuario)
+                EjecutarNonQuery(conn, $"DELETE FROM {tabla} WHERE UsuarioId=$id", ("$id", usuarioId));
+
+            EjecutarNonQuery(conn, "DELETE FROM Usuarios WHERE Id=$id", ("$id", usuarioId));
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
     }
 
     public void CambiarPassword(int usuarioId, string nuevaPassword)
@@ -580,6 +1056,18 @@ public class AppDatabase
     }
 
     // ── Categorías ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Categorías que la propia aplicación escribe por nombre al generar transacciones
+    /// automáticas (pagos de fijos, salario, pagos de tarjeta). Se siembran como globales
+    /// y no se pueden renombrar ni borrar: si cambiaran de nombre, el código seguiría
+    /// escribiendo el nombre viejo y las transacciones quedarían descolgadas del filtro.
+    /// </summary>
+    public static readonly string[] CategoriasSistema =
+        ["Gastos Fijos", "Ingresos Fijos", "Salario", "Tarjeta"];
+
+    public static bool EsCategoriaSistema(string nombre) =>
+        CategoriasSistema.Contains(nombre, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Devuelve nombres de categorías visibles para el usuario: globales + propias.</summary>
     public List<string> ObtenerCategorias(int usuarioId)
@@ -627,9 +1115,36 @@ public class AppDatabase
             ("$uid", uid), ("$n", nombre.Trim()));
     }
 
+    /// <summary>Transacciones del usuario que usan esa categoría.</summary>
+    public int ContarTransaccionesEnCategoria(string nombre, int usuarioId)
+    {
+        using var conn = Abrir();
+        return (int)EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE Categoria=$n AND UsuarioId=$uid",
+            ("$n", nombre), ("$uid", usuarioId));
+    }
+
+    /// <summary>
+    /// Se niega a borrar una categoría en uso: las transacciones guardan el nombre, así que
+    /// quedarían con una etiqueta que ya no aparece en ningún filtro.
+    /// </summary>
     public void EliminarCategoria(int categoriaId, int usuarioId, bool esAdmin)
     {
         using var conn = Abrir();
+
+        // Las categorías de sistema no se borran ni siendo admin: la aplicación las escribe
+        // por nombre al generar transacciones automáticas.
+        var nombre = EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT Nombre FROM Categorias WHERE Id=$id),'')", ("$id", categoriaId));
+        if (EsCategoriaSistema(nombre)) return;
+
+        var enUso = EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE Categoria=$n", ("$n", nombre));
+        if (enUso > 0)
+            throw new InvalidOperationException(
+                $"«{nombre}» se usa en {enUso} transacción{(enUso == 1 ? "" : "es")}. " +
+                "Reasígnalas a otra categoría antes de eliminarla.");
+
         // Admin puede borrar cualquiera; usuario normal solo las propias
         if (esAdmin)
             EjecutarNonQuery(conn, "DELETE FROM Categorias WHERE Id=$id", ("$id", categoriaId));
@@ -641,25 +1156,68 @@ public class AppDatabase
     public void ActualizarCategoria(int categoriaId, string nombreNuevo, int usuarioId, bool esAdmin)
     {
         using var conn = Abrir();
-        if (esAdmin)
-            EjecutarNonQuery(conn,
-                "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id",
-                ("$nuevo", nombreNuevo.Trim()), ("$id", categoriaId));
-        else
-            EjecutarNonQuery(conn,
-                "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id AND UsuarioId=$uid",
-                ("$nuevo", nombreNuevo.Trim()), ("$id", categoriaId), ("$uid", usuarioId));
+
+        // Ver EliminarCategoria: renombrarla dejaría el código escribiendo el nombre viejo.
+        var nombreActual = EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT Nombre FROM Categorias WHERE Id=$id),'')", ("$id", categoriaId));
+        if (EsCategoriaSistema(nombreActual)) return;
+
+        var nuevo = nombreNuevo.Trim();
+        if (nuevo.Length == 0 || nuevo == nombreActual) return;
+
+        using var tr = conn.BeginTransaction();
+        try
+        {
+            var filas = esAdmin
+                ? EjecutarScalar<long>(conn,
+                    "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id; SELECT changes()",
+                    ("$nuevo", nuevo), ("$id", categoriaId))
+                : EjecutarScalar<long>(conn,
+                    "UPDATE Categorias SET Nombre=$nuevo WHERE Id=$id AND UsuarioId=$uid; SELECT changes()",
+                    ("$nuevo", nuevo), ("$id", categoriaId), ("$uid", usuarioId));
+
+            // El renombrado se propaga al historial. Las transacciones guardan el NOMBRE, así
+            // que sin esto todo lo registrado antes conservaba el nombre viejo y dejaba de
+            // aparecer en el filtro: la categoría se renombraba y el pasado se quedaba huérfano.
+            if (filas > 0)
+                EjecutarNonQuery(conn,
+                    "UPDATE Transacciones SET Categoria=$nuevo WHERE Categoria=$viejo",
+                    ("$nuevo", nuevo), ("$viejo", nombreActual));
+
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
     }
 
     // ── Transacciones ─────────────────────────────────────────────────────────
 
     public void InsertarTransaccion(Transaccion t, int usuarioId)
     {
+        // Una tarjeta de crédito es una fuente de deuda, no de ingresos.
+        if (t.Tipo == "Ingreso" && t.TarjetaCreditoId.HasValue)
+            throw new ArgumentException(
+                "Un ingreso no puede tener una tarjeta de crédito como origen.", nameof(t));
+
+        // Comprar con la tarjeta y pagar la tarjeta son movimientos opuestos: una misma fila no
+        // puede ser los dos, o se contaría en los dos ejes a la vez.
+        if (t.TarjetaCreditoId.HasValue && t.PagoDeTarjetaId.HasValue)
+            throw new ArgumentException(
+                "Una transacción no puede ser a la vez compra con tarjeta y pago de tarjeta.", nameof(t));
+
+        // La categoría «Tarjeta» identifica los pagos de tarjeta, y un pago SIEMPRE tiene que
+        // decir qué tarjeta salda. Si no, se contaría como un gasto nuevo además de la compra
+        // que ya se registró: el mismo dinero dos veces. Los pagos se registran en la pantalla
+        // de Tarjetas, que es la única que conoce el saldo pendiente.
+        if (t.Categoria == "Tarjeta" && !t.PagoDeTarjetaId.HasValue)
+            throw new ArgumentException(
+                "Los pagos de tarjeta se registran desde la pantalla Tarjetas, para que se " +
+                "descuenten del saldo y no se cuenten dos veces.", nameof(t));
+
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId)
-            VALUES ($uid,$tipo,$monto,$cat,$desc,$fecha,$notas,$cuenta,$tarjeta,$cuentaid)
+            INSERT INTO Transacciones (UsuarioId,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId)
+            VALUES ($uid,$tipo,$monto,$cat,$desc,$fecha,$notas,$cuenta,$tarjeta,$cuentaid,$pagotarjeta)
             """;
         cmd.Parameters.AddWithValue("$uid",      usuarioId);
         cmd.Parameters.AddWithValue("$tipo",     t.Tipo);
@@ -671,24 +1229,11 @@ public class AppDatabase
         cmd.Parameters.AddWithValue("$cuenta",   t.CuentaNombre);
         cmd.Parameters.AddWithValue("$tarjeta",  t.TarjetaCreditoId.HasValue ? t.TarjetaCreditoId.Value : DBNull.Value);
         cmd.Parameters.AddWithValue("$cuentaid", t.CuentaId.HasValue ? t.CuentaId.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("$pagotarjeta", t.PagoDeTarjetaId.HasValue ? t.PagoDeTarjetaId.Value : DBNull.Value);
         cmd.ExecuteNonQuery();
 
-        // Actualizar saldo de tarjeta de crédito (gastos)
-        if (t.TarjetaCreditoId.HasValue && t.Tipo == "Gasto")
-        {
-            EjecutarNonQuery(conn,
-                "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado + $m WHERE Id=$id AND UsuarioId=$uid",
-                ("$m", (double)t.Monto), ("$id", t.TarjetaCreditoId.Value), ("$uid", usuarioId));
-        }
-
-        // Actualizar saldo de cuenta bancaria
-        if (t.CuentaId.HasValue)
-        {
-            var delta = t.Tipo == "Ingreso" ? t.Monto : -t.Monto;
-            EjecutarNonQuery(conn,
-                "UPDATE Cuentas SET SaldoActual = SaldoActual + $d WHERE Id=$id",
-                ("$d", (double)delta), ("$id", t.CuentaId.Value));
-        }
+        // No se ajusta ningún contador: ni el saldo de la cuenta ni el de la tarjeta.
+        // Los dos se derivan de estas mismas filas al leerlos (decisiones D1 y D3).
     }
 
     public List<Transaccion> ObtenerTransacciones(int usuarioId)
@@ -696,7 +1241,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId " +
+            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId " +
             "FROM Transacciones WHERE UsuarioId=$uid ORDER BY Fecha DESC, Id DESC";
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<Transaccion>();
@@ -710,7 +1255,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId " +
+            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId " +
             "FROM Transacciones WHERE TarjetaCreditoId=$id ORDER BY Fecha DESC";
         cmd.Parameters.AddWithValue("$id", tarjetaId);
         var list = new List<Transaccion>();
@@ -719,40 +1264,28 @@ public class AppDatabase
         return list;
     }
 
+    /// <summary>
+    /// Borrar es sólo borrar. No hay saldos que revertir: tanto el de la cuenta (D1) como el de
+    /// la tarjeta (D3) se derivan de las transacciones, así que al desaparecer la fila dejan de
+    /// sumar por su cuenta. Antes esto leía la transacción para deshacer dos contadores a mano.
+    /// </summary>
     public void EliminarTransaccion(int id)
     {
         using var conn = Abrir();
-
-        using (var cmd = conn.CreateCommand())
+        using var tr   = conn.BeginTransaction();
+        try
         {
-            cmd.CommandText = "SELECT Tipo, Monto, TarjetaCreditoId, CuentaId FROM Transacciones WHERE Id=$id";
-            cmd.Parameters.AddWithValue("$id", id);
-            using var r = cmd.ExecuteReader();
-            if (r.Read())
-            {
-                var tipo     = r.GetString(0);
-                var monto    = r.GetDouble(1);
-                var tarjId   = r.IsDBNull(2) ? (int?)null : r.GetInt32(2);
-                var cuentaId = r.IsDBNull(3) ? (int?)null : r.GetInt32(3);
+            // Si esta transacción la generó un gasto o ingreso fijo al marcarse pagado, borrarla
+            // significa que ya no está pagado. La clave foránea sola dejaría Pagado=1 apuntando
+            // a nada, que es justo el estado que antes hacía reventar la aplicación.
+            EjecutarNonQuery(conn,
+                "UPDATE PagosMensuales SET Pagado=0, MetodoPago='', TransaccionId=NULL WHERE TransaccionId=$id",
+                ("$id", id));
 
-                // Revertir saldo de tarjeta de crédito
-                if (tarjId.HasValue && tipo == "Gasto")
-                    EjecutarNonQuery(conn,
-                        "UPDATE TarjetasCredito SET SaldoUsado = MAX(0, SaldoUsado - $m) WHERE Id=$id2",
-                        ("$m", monto), ("$id2", tarjId.Value));
-
-                // Revertir saldo de cuenta bancaria
-                if (cuentaId.HasValue)
-                {
-                    var delta = tipo == "Ingreso" ? -monto : monto;
-                    EjecutarNonQuery(conn,
-                        "UPDATE Cuentas SET SaldoActual = SaldoActual + $d WHERE Id=$cid",
-                        ("$d", delta), ("$cid", cuentaId.Value));
-                }
-            }
+            EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", id));
+            tr.Commit();
         }
-
-        EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", id));
+        catch { tr.Rollback(); throw; }
     }
 
     private static Transaccion MapTransaccion(SqliteDataReader r) => new()
@@ -766,7 +1299,8 @@ public class AppDatabase
         Notas            = r.IsDBNull(6) ? "" : r.GetString(6),
         CuentaNombre     = r.IsDBNull(7) ? "Efectivo" : r.GetString(7),
         TarjetaCreditoId = r.IsDBNull(8) ? null : r.GetInt32(8),
-        CuentaId         = r.IsDBNull(9) ? null : r.GetInt32(9)
+        CuentaId         = r.IsDBNull(9) ? null : r.GetInt32(9),
+        PagoDeTarjetaId  = r.IsDBNull(10) ? null : r.GetInt32(10)
     };
 
     // ── Metas de Ahorro ───────────────────────────────────────────────────────
@@ -823,49 +1357,58 @@ public class AppDatabase
 
     // ── Tarjetas de Crédito ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// Los saldos se calculan (decisión D3):
+    /// <list type="bullet">
+    /// <item><c>SaldoUsado</c> = compras con la tarjeta − pagos hechos. Es la deuda real.</item>
+    /// <item><c>ConsumoPeriodo</c> = compras desde el último corte. Informativo.</item>
+    /// </list>
+    /// <para>
+    /// Antes <c>SaldoUsado</c> era un contador que esta misma función ponía a cero al cruzar el
+    /// día de corte. Pero el corte no es cuando se paga: entre el corte y el día de pago la
+    /// aplicación afirmaba que no se debía nada. Y al ser un UPDATE dentro de una lectura,
+    /// bastaba abrir cualquier pantalla ese día para perder el dato.
+    /// </para>
+    /// </summary>
     public List<TarjetaCredito> ObtenerTarjetas(int usuarioId)
     {
         using var conn = Abrir();
-        using var cmd  = conn.CreateCommand();
-        cmd.CommandText = "SELECT Id,Nombre,LimiteCredito,SaldoUsado,DiaCierre,DiaPago,FechaUltimoCorte FROM TarjetasCredito WHERE UsuarioId=$uid";
-        cmd.Parameters.AddWithValue("$uid", usuarioId);
+
+        // Primero los datos fijos; el corte depende de DiaCierre y se calcula en el modelo.
         var list = new List<TarjetaCredito>();
-        using var r = cmd.ExecuteReader();
-        while (r.Read())
+        using (var cmd = conn.CreateCommand())
         {
-            var t = new TarjetaCredito
-            {
-                Id               = r.GetInt32(0),
-                Nombre           = r.GetString(1),
-                LimiteCredito    = (decimal)r.GetDouble(2),
-                SaldoUsado       = (decimal)r.GetDouble(3),
-                DiaCierre        = r.GetInt32(4),
-                DiaPago          = r.GetInt32(5),
-                FechaUltimoCorte = r.IsDBNull(6) || string.IsNullOrEmpty(r.GetString(6))
-                    ? DateTime.MinValue
-                    : DateTime.Parse(r.GetString(6))
-            };
-            list.Add(t);
+            cmd.CommandText = """
+                SELECT Id, Nombre, LimiteCredito, DiaCierre, DiaPago,
+                       COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.TarjetaCreditoId = TarjetasCredito.Id AND t.Tipo = 'Gasto'), 0)
+                     - COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.PagoDeTarjetaId  = TarjetasCredito.Id), 0)
+                FROM TarjetasCredito
+                WHERE UsuarioId = $uid
+                """;
+            cmd.Parameters.AddWithValue("$uid", usuarioId);
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+                list.Add(new TarjetaCredito
+                {
+                    Id            = r.GetInt32(0),
+                    Nombre        = r.GetString(1),
+                    LimiteCredito = (decimal)r.GetDouble(2),
+                    DiaCierre     = r.GetInt32(3),
+                    DiaPago       = r.GetInt32(4),
+                    SaldoUsado    = (decimal)r.GetDouble(5)
+                });
         }
 
-        // Auto-reset al cruzar la fecha de cierre de período
+        // Consumo del período en curso: compras desde el último corte.
         foreach (var t in list)
-            AutoRenovarPeriodo(conn, t);
+            t.ConsumoPeriodo = (decimal)EjecutarScalar<double>(conn,
+                "SELECT COALESCE(SUM(Monto), 0) FROM Transacciones " +
+                "WHERE TarjetaCreditoId = $id AND Tipo = 'Gasto' AND Fecha >= $desde",
+                ("$id", t.Id), ("$desde", t.InicioPeriodo.ToString("yyyy-MM-dd")));
 
         return list;
-    }
-
-    private void AutoRenovarPeriodo(SqliteConnection conn, TarjetaCredito t)
-    {
-        var inicioPeriodo = t.InicioPeriodo;
-        if (t.FechaUltimoCorte < inicioPeriodo.Date)
-        {
-            EjecutarNonQuery(conn,
-                "UPDATE TarjetasCredito SET SaldoUsado=0, FechaUltimoCorte=$f WHERE Id=$id",
-                ("$f", inicioPeriodo.ToString("yyyy-MM-dd")), ("$id", t.Id));
-            t.SaldoUsado       = 0;
-            t.FechaUltimoCorte = inicioPeriodo;
-        }
     }
 
     public void InsertarTarjeta(TarjetaCredito t, int usuarioId)
@@ -880,36 +1423,74 @@ public class AppDatabase
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
-            "UPDATE TarjetasCredito SET Nombre=$nombre, LimiteCredito=$lim, SaldoUsado=$saldo, DiaCierre=$cierre, DiaPago=$pago WHERE Id=$id",
-            ("$nombre", t.Nombre), ("$lim", (double)t.LimiteCredito), ("$saldo", (double)t.SaldoUsado),
+            // SaldoUsado no se escribe: se deriva de las compras y los pagos.
+            "UPDATE TarjetasCredito SET Nombre=$nombre, LimiteCredito=$lim, DiaCierre=$cierre, DiaPago=$pago WHERE Id=$id",
+            ("$nombre", t.Nombre), ("$lim", (double)t.LimiteCredito),
             ("$cierre", t.DiaCierre), ("$pago", t.DiaPago), ("$id", t.Id));
     }
 
+    /// <summary>Compras y pagos asociados a una tarjeta.</summary>
+    public int ContarMovimientosDeTarjeta(int tarjetaId)
+    {
+        using var conn = Abrir();
+        return (int)EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE TarjetaCreditoId=$id OR PagoDeTarjetaId=$id",
+            ("$id", tarjetaId));
+    }
+
+    /// <summary>
+    /// Se niega a borrar una tarjeta con movimientos. Antes los dejaba huérfanos, y esas
+    /// transacciones quedaban además inalcanzables desde la interfaz: sólo se llega a ellas
+    /// a través de la tarjeta.
+    /// </summary>
     public void EliminarTarjeta(int id)
     {
         using var conn = Abrir();
+
+        var movimientos = EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE TarjetaCreditoId=$id OR PagoDeTarjetaId=$id",
+            ("$id", id));
+        if (movimientos > 0)
+            throw new InvalidOperationException(
+                $"La tarjeta tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} registrado" +
+                $"{(movimientos == 1 ? "" : "s")}. Eliminarla dejaría esas transacciones sin forma de consultarse.");
+
         EjecutarNonQuery(conn, "DELETE FROM TarjetasCredito WHERE Id=$id", ("$id", id));
     }
 
     // ── Cuentas ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// El saldo se calcula aquí: <c>SaldoInicial + Σ transacciones de la cuenta</c>.
+    /// No existe ningún contador acumulado que mantener en sincronía, así que la deriva entre
+    /// el saldo mostrado y las transacciones es imposible por construcción.
+    /// </summary>
     public List<Cuenta> ObtenerCuentas(int usuarioId)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
-        cmd.CommandText = "SELECT Id,Nombre,Tipo,Banco,Activa,SaldoActual FROM Cuentas WHERE UsuarioId=$uid ORDER BY Activa DESC, Nombre";
+        cmd.CommandText = """
+            SELECT c.Id, c.Nombre, c.Tipo, c.Banco, c.Activa, c.SaldoInicial,
+                   c.SaldoInicial + COALESCE(
+                       (SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
+                        FROM Transacciones t WHERE t.CuentaId = c.Id), 0)
+            FROM Cuentas c
+            WHERE c.UsuarioId = $uid
+            ORDER BY c.Activa DESC, c.Nombre
+            """;
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<Cuenta>();
         using var r = cmd.ExecuteReader();
         while (r.Read())
             list.Add(new Cuenta
             {
-                Id          = r.GetInt32(0),
-                Nombre      = r.GetString(1),
-                Tipo        = r.GetString(2),
-                Banco       = r.GetString(3),
-                Activa      = r.GetInt32(4) == 1,
-                SaldoActual = (decimal)r.GetDouble(5)
+                Id           = r.GetInt32(0),
+                Nombre       = r.GetString(1),
+                Tipo         = r.GetString(2),
+                Banco        = r.GetString(3),
+                Activa       = r.GetInt32(4) == 1,
+                SaldoInicial = (decimal)r.GetDouble(5),
+                SaldoActual  = (decimal)r.GetDouble(6)
             });
         return list;
     }
@@ -918,33 +1499,53 @@ public class AppDatabase
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
-            "INSERT INTO Cuentas (UsuarioId, Nombre, Tipo, Banco, Activa) VALUES ($uid,$n,$t,$b,$a)",
+            "INSERT INTO Cuentas (UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial) VALUES ($uid,$n,$t,$b,$a,$si)",
             ("$uid", usuarioId), ("$n", c.Nombre), ("$t", c.Tipo),
-            ("$b", c.Banco), ("$a", c.Activa ? 1 : 0));
+            ("$b", c.Banco), ("$a", c.Activa ? 1 : 0), ("$si", (double)c.SaldoInicial));
     }
 
     public void ActualizarCuenta(Cuenta c)
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
-            "UPDATE Cuentas SET Nombre=$n, Tipo=$t, Banco=$b, Activa=$a WHERE Id=$id",
+            "UPDATE Cuentas SET Nombre=$n, Tipo=$t, Banco=$b, Activa=$a, SaldoInicial=$si WHERE Id=$id",
             ("$n", c.Nombre), ("$t", c.Tipo), ("$b", c.Banco),
-            ("$a", c.Activa ? 1 : 0), ("$id", c.Id));
+            ("$a", c.Activa ? 1 : 0), ("$si", (double)c.SaldoInicial), ("$id", c.Id));
     }
 
+    /// <summary>Movimientos registrados contra una cuenta. 0 si se puede eliminar sin perder nada.</summary>
+    public int ContarMovimientosDeCuenta(int cuentaId)
+    {
+        using var conn = Abrir();
+        return (int)EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE CuentaId=$id", ("$id", cuentaId));
+    }
+
+    /// <summary>
+    /// Se niega a borrar una cuenta con movimientos. Borrarla no borraría el dinero que pasó por
+    /// ella: las transacciones son hechos, la cuenta es la etiqueta de por dónde pasaron. Quedarían
+    /// apuntando al vacío y sin sumar a ningún saldo.
+    /// <para>Para dejar de verla, se desactiva (<c>Activa = false</c>), que conserva el histórico.</para>
+    /// </summary>
     public void EliminarCuenta(int id)
     {
         using var conn = Abrir();
+
+        var movimientos = EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM Transacciones WHERE CuentaId=$id", ("$id", id));
+        if (movimientos > 0)
+            throw new InvalidOperationException(
+                $"La cuenta tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} registrado" +
+                $"{(movimientos == 1 ? "" : "s")}. Desactívala para dejar de usarla sin perder el historial.");
+
+        // Los ingresos fijos que apuntaran aquí quedarían colgando; se desvinculan.
+        EjecutarNonQuery(conn, "UPDATE IngresosFijos SET CuentaId=NULL WHERE CuentaId=$id", ("$id", id));
         EjecutarNonQuery(conn, "DELETE FROM Cuentas WHERE Id=$id", ("$id", id));
     }
 
-    public void AbonarTarjeta(int tarjetaId, decimal monto)
-    {
-        using var conn = Abrir();
-        EjecutarNonQuery(conn,
-            "UPDATE TarjetasCredito SET SaldoUsado = MAX(0, SaldoUsado - $m) WHERE Id=$id",
-            ("$m", (double)monto), ("$id", tarjetaId));
-    }
+    // AbonarTarjeta() desapareció con la decisión D3: el abono ya se registra como una
+    // transacción con PagoDeTarjetaId, y el saldo de la tarjeta se deriva de esas mismas filas.
+    // No queda ningún contador que ajustar aparte.
 
     // ── Gastos Fijos ──────────────────────────────────────────────────────────
 
@@ -998,9 +1599,15 @@ public class AppDatabase
     public void InsertarGastoFijo(GastoFijo g, int usuarioId)
     {
         using var conn = Abrir();
+
+        // Dos días iguales generarían dos filas en la interfaz compartiendo el MISMO
+        // PagoMensual (la clave única incluye Dia): marcar una marcaría las dos y el total
+        // se contaría por duplicado. Un segundo día repetido es, sencillamente, no tener segundo día.
+        var dia2 = g.DiaVencimiento2 == g.DiaVencimiento ? 0 : g.DiaVencimiento2;
+
         EjecutarNonQuery(conn,
             "INSERT INTO GastosFijos (UsuarioId,Nombre,Monto,DiaVencimiento,DiaVencimiento2) VALUES ($uid,$n,$m,$d,$d2)",
-            ("$uid", usuarioId), ("$n", g.Nombre), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", g.DiaVencimiento2));
+            ("$uid", usuarioId), ("$n", g.Nombre), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", dia2));
     }
 
     public void EliminarGastoFijo(int id)
@@ -1028,14 +1635,6 @@ public class AppDatabase
             foreach (var (transId, monto, cuentaId, tarjetaId) in pagos)
             {
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$tid", ("$tid", transId));
-                if (tarjetaId.HasValue)
-                    EjecutarNonQuery(conn,
-                        "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado - $m WHERE Id=$cid",
-                        ("$m", monto), ("$cid", tarjetaId.Value));
-                if (cuentaId.HasValue)
-                    EjecutarNonQuery(conn,
-                        "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$cid",
-                        ("$m", monto), ("$cid", cuentaId.Value));
             }
         }
 
@@ -1098,17 +1697,7 @@ public class AppDatabase
                 "UPDATE PagosMensuales SET Pagado=1, MetodoPago=$m, TransaccionId=$tid WHERE Id=$id",
                 ("$m", metodoPago), ("$tid", newTransId), ("$id", pagoMensualId));
 
-            // Actualizar saldo de tarjeta de crédito
-            if (tarjetaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado + $m WHERE Id=$id",
-                    ("$m", (double)datos.Monto), ("$id", tarjetaId.Value));
 
-            // Actualizar saldo de cuenta bancaria
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$id",
-                    ("$m", (double)datos.Monto), ("$id", cuentaId.Value));
         }
         else
         {
@@ -1140,15 +1729,7 @@ public class AppDatabase
             if (prevTransId.HasValue)
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", prevTransId.Value));
 
-            if (prevTarjetaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE TarjetasCredito SET SaldoUsado = SaldoUsado - $m WHERE Id=$id",
-                    ("$m", prevMonto), ("$id", prevTarjetaId.Value));
 
-            if (prevCuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$id",
-                    ("$m", prevMonto), ("$id", prevCuentaId.Value));
 
             EjecutarNonQuery(conn,
                 "UPDATE PagosMensuales SET Pagado=0, MetodoPago='', TransaccionId=NULL WHERE Id=$id",
@@ -1207,10 +1788,14 @@ public class AppDatabase
     public void InsertarIngresoFijo(IngresoFijo i, int usuarioId)
     {
         using var conn = Abrir();
+
+        // Ver la nota en InsertarGastoFijo: dos días iguales comparten PagoMensual y duplican.
+        var dia2 = i.DiaIngreso2 == i.DiaIngreso ? 0 : i.DiaIngreso2;
+
         EjecutarNonQuery(conn,
             "INSERT INTO IngresosFijos (UsuarioId,Nombre,Monto,DiaIngreso,DiaIngreso2,CuentaId) VALUES ($uid,$n,$m,$d,$d2,$cid)",
             ("$uid", usuarioId), ("$n", i.Nombre), ("$m", (double)i.Monto),
-            ("$d", i.DiaIngreso), ("$d2", i.DiaIngreso2),
+            ("$d", i.DiaIngreso), ("$d2", dia2),
             ("$cid", i.CuentaId.HasValue ? i.CuentaId.Value : DBNull.Value));
     }
 
@@ -1226,6 +1811,7 @@ public class AppDatabase
                 FROM PagosMensuales p
                 JOIN IngresosFijos i ON i.Id = p.FijoId
                 WHERE p.FijoId=$id AND p.TipoFijo='Ingreso' AND p.Pagado=1
+                  AND p.TransaccionId IS NOT NULL
                 """;
             cmd.Parameters.AddWithValue("$id", id);
             var pagos = new List<(long TransId, double Monto, int? CuentaId)>();
@@ -1236,10 +1822,6 @@ public class AppDatabase
             foreach (var (transId, monto, cuentaId) in pagos)
             {
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$tid", ("$tid", transId));
-                if (cuentaId.HasValue)
-                    EjecutarNonQuery(conn,
-                        "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$cid",
-                        ("$m", monto), ("$cid", cuentaId.Value));
             }
         }
 
@@ -1302,11 +1884,6 @@ public class AppDatabase
                 "UPDATE PagosMensuales SET Pagado=1, TransaccionId=$tid WHERE Id=$id",
                 ("$tid", newId), ("$id", pagoMensualId));
 
-            // Actualizar saldo de la cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$cid",
-                    ("$m", (double)monto), ("$cid", cuentaId.Value));
         }
         else
         {
@@ -1334,11 +1911,6 @@ public class AppDatabase
             if (tid.HasValue)
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", tid.Value));
 
-            // Revertir saldo de la cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$cid",
-                    ("$m", monto), ("$cid", cuentaId.Value));
 
             EjecutarNonQuery(conn,
                 "UPDATE PagosMensuales SET Pagado=0, TransaccionId=NULL WHERE Id=$id",
@@ -1396,7 +1968,8 @@ public class AppDatabase
                    SUM(CASE WHEN Tipo='Ingreso' THEN Monto ELSE 0 END) AS Ingresos,
                    SUM(CASE WHEN Tipo='Gasto'   THEN Monto ELSE 0 END) AS Gastos
             FROM Transacciones
-            WHERE Fecha >= $desde AND TarjetaCreditoId IS NULL AND UsuarioId = $uid
+            WHERE Fecha >= $desde AND UsuarioId = $uid
+              AND PagoDeTarjetaId IS NULL   -- eje presupuesto: en qué se gastó
             GROUP BY Periodo
             ORDER BY Periodo
             """;
@@ -1447,7 +2020,7 @@ public class AppDatabase
                 HorasExtraNocturnas REAL    NOT NULL DEFAULT 0,
                 HorasDobles         REAL    NOT NULL DEFAULT 0,
                 EsFeriado           INTEGER NOT NULL DEFAULT 0,
-                EsAusencia          INTEGER NOT NULL DEFAULT 0,
+                HorasAusencia       REAL    NOT NULL DEFAULT 0,
                 TieneGoceSalario    INTEGER NOT NULL DEFAULT 0,
                 Viaticos            REAL    NOT NULL DEFAULT 0,
                 UNIQUE(UsuarioId, Fecha)
@@ -1455,14 +2028,14 @@ public class AppDatabase
             CREATE TABLE IF NOT EXISTS PeriodosLaborales (
                 Id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 UsuarioId     INTEGER NOT NULL,
-                Anio          INTEGER NOT NULL,
-                Mes           INTEGER NOT NULL,
+                FechaInicio   TEXT    NOT NULL,
+                FechaFin      TEXT    NOT NULL,
                 SalarioBruto  REAL    NOT NULL DEFAULT 0,
                 Deducciones   REAL    NOT NULL DEFAULT 0,
                 SalarioNeto   REAL    NOT NULL DEFAULT 0,
                 Cerrado       INTEGER NOT NULL DEFAULT 0,
                 TransaccionId INTEGER,
-                UNIQUE(UsuarioId, Anio, Mes)
+                UNIQUE(UsuarioId, FechaInicio)
             )
             """);
 
@@ -1473,9 +2046,21 @@ public class AppDatabase
         if (!cfgCols.Contains("DiaSemana")) AddColumna(conn, "ConfiguracionLaboral", "DiaSemana", "INTEGER NOT NULL DEFAULT 5");
         if (!cfgCols.Contains("Viaticos"))  AddColumna(conn, "ConfiguracionLaboral", "Viaticos",  "REAL    NOT NULL DEFAULT 0");
 
+        // Los días de la semana que se trabajan: el cálculo los tenía clavados en 6, de modo que
+        // con una semana de 5 días la hora diaria salía un 20 % baja y con ella cada feriado.
+        if (!cfgCols.Contains("DiasPorSemana"))
+            AddColumna(conn, "ConfiguracionLaboral", "DiasPorSemana", "INTEGER NOT NULL DEFAULT 5");
+
+        // La deducción cambia por ley; estaba escrita a mano como 10,67 % en cuatro sitios.
+        if (!cfgCols.Contains("PorcentajeDeduccion"))
+            AddColumna(conn, "ConfiguracionLaboral", "PorcentajeDeduccion", "REAL NOT NULL DEFAULT 10.83");
+
         // Migrar PeriodosLaborales
         var plCols = GetColumnas(conn, "PeriodosLaborales");
         if (!plCols.Contains("Notas")) AddColumna(conn, "PeriodosLaborales", "Notas", "TEXT NOT NULL DEFAULT ''");
+
+        MigrarRegistrosAAusenciaPorHoras(conn);
+        MigrarPeriodosARangoDeFechas(conn);
 
         // Tabla de ingresos laborales directos (sin necesidad de cerrar período)
         EjecutarNonQuery(conn, """
@@ -1491,12 +2076,161 @@ public class AppDatabase
             """);
     }
 
+
+    /// <summary>
+    /// La ausencia deja de ser un booleano de día completo y pasa a medirse en horas: faltar
+    /// tres horas no se podía registrar. Los días que ya estaban marcados se convierten a la
+    /// jornada diaria configurada, que es lo que significaban.
+    /// </summary>
+    private static void MigrarRegistrosAAusenciaPorHoras(SqliteConnection conn)
+    {
+        var cols = GetColumnas(conn, "RegistrosDiasLaborales");
+        if (cols.Contains("HorasAusencia")) return;
+
+        AddColumna(conn, "RegistrosDiasLaborales", "HorasAusencia", "REAL NOT NULL DEFAULT 0");
+
+        if (!cols.Contains("EsAusencia")) return;
+
+        // Un día completo vale JornadaSemanal / DiasPorSemana; si no hay configuración, 8 h.
+        EjecutarNonQuery(conn, """
+            UPDATE RegistrosDiasLaborales
+            SET HorasAusencia = COALESCE((
+                    SELECT c.JornadaSemanal / MAX(c.DiasPorSemana, 1)
+                    FROM ConfiguracionLaboral c
+                    WHERE c.UsuarioId = RegistrosDiasLaborales.UsuarioId), 8)
+            WHERE EsAusencia = 1
+            """);
+    }
+
+    /// <summary>
+    /// <c>PeriodosLaborales</c> pasa de identificarse por <c>(Anio, Mes)</c> a hacerlo por rango
+    /// de fechas. La clave única por mes hacía imposible guardar dos quincenas del mismo mes,
+    /// así que el modo "Quincenal" que ofrecía la interfaz no podía funcionar.
+    /// <para>
+    /// Los períodos que ya existieran se convierten al mes natural completo, que es lo que
+    /// representaban.
+    /// </para>
+    /// </summary>
+    private static void MigrarPeriodosARangoDeFechas(SqliteConnection conn)
+    {
+        var cols = GetColumnas(conn, "PeriodosLaborales");
+        if (cols.Contains("FechaInicio")) return;
+
+        using var tr = conn.BeginTransaction();
+        try
+        {
+            EjecutarNonQuery(conn, """
+                CREATE TABLE PeriodosLaborales__v2 (
+                    Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UsuarioId     INTEGER NOT NULL,
+                    FechaInicio   TEXT    NOT NULL,
+                    FechaFin      TEXT    NOT NULL,
+                    SalarioBruto  REAL    NOT NULL DEFAULT 0,
+                    Deducciones   REAL    NOT NULL DEFAULT 0,
+                    SalarioNeto   REAL    NOT NULL DEFAULT 0,
+                    Cerrado       INTEGER NOT NULL DEFAULT 0,
+                    TransaccionId INTEGER,
+                    Notas         TEXT    NOT NULL DEFAULT '',
+                    UNIQUE(UsuarioId, FechaInicio),
+                    FOREIGN KEY (UsuarioId)     REFERENCES Usuarios(Id)      ON DELETE CASCADE,
+                    FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE SET NULL
+                )
+                """);
+
+            // Anio/Mes → el mes natural completo, que es lo que esas filas significaban.
+            EjecutarNonQuery(conn, """
+                INSERT INTO PeriodosLaborales__v2
+                    (Id, UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones,
+                     SalarioNeto, Cerrado, TransaccionId, Notas)
+                SELECT Id, UsuarioId,
+                       printf('%04d-%02d-01', Anio, Mes),
+                       date(printf('%04d-%02d-01', Anio, Mes), '+1 month', '-1 day'),
+                       SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId,
+                       COALESCE(Notas, '')
+                FROM PeriodosLaborales
+                """);
+
+            EjecutarNonQuery(conn, "DROP TABLE PeriodosLaborales");
+            EjecutarNonQuery(conn, "ALTER TABLE PeriodosLaborales__v2 RENAME TO PeriodosLaborales");
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
+    }
+    /// <summary>
+    /// Parte 2 de Control Laboral: el salario se configura como mensual, cada período cerrado
+    /// guarda los parámetros con que se calculó, y el comprobante de pago se anota aparte.
+    /// </summary>
+    private static void MigrarComprobantesDePago(SqliteConnection conn)
+    {
+        var cfgCols = GetColumnas(conn, "ConfiguracionLaboral");
+        if (!cfgCols.Contains("SalarioMensual"))
+        {
+            AddColumna(conn, "ConfiguracionLaboral", "SalarioMensual", "REAL NOT NULL DEFAULT 0");
+            // Se deshace la cuenta con que se obtuvo la hora: mensual ÷ (jornada × 52 / 12). Es
+            // una aproximación —la hora se guardaba sin decimales— y conviene corregirla a mano
+            // con el "Salario Fijo" del comprobante × 2.
+            EjecutarNonQuery(conn, """
+                UPDATE ConfiguracionLaboral
+                SET SalarioMensual = ROUND(SalarioPorHora * JornadaSemanal * 52.0 / 12.0, 2)
+                WHERE SalarioPorHora > 0
+                """);
+        }
+
+        var plCols = GetColumnas(conn, "PeriodosLaborales");
+        if (!plCols.Contains("SalarioMensual"))
+            AddColumna(conn, "PeriodosLaborales", "SalarioMensual", "REAL");
+        if (!plCols.Contains("PorcentajeDeduccion"))
+            AddColumna(conn, "PeriodosLaborales", "PorcentajeDeduccion", "REAL");
+        if (!plCols.Contains("Viaticos"))
+            AddColumna(conn, "PeriodosLaborales", "Viaticos", "REAL");
+
+        // Uno por período, y se va con él.
+        EjecutarNonQuery(conn, """
+            CREATE TABLE IF NOT EXISTS ComprobantesPago (
+                PeriodoId      INTEGER PRIMARY KEY,
+                SalarioFijo    REAL NOT NULL DEFAULT 0,
+                HorasExtra     REAL NOT NULL DEFAULT 0,
+                MontoExtra     REAL NOT NULL DEFAULT 0,
+                HorasNocturnas REAL NOT NULL DEFAULT 0,
+                MontoNocturnas REAL NOT NULL DEFAULT 0,
+                HorasDobles    REAL NOT NULL DEFAULT 0,
+                MontoDobles    REAL NOT NULL DEFAULT 0,
+                OtrosAjustes   REAL NOT NULL DEFAULT 0,
+                Viaticos       REAL NOT NULL DEFAULT 0,
+                Deducciones    REAL NOT NULL DEFAULT 0,
+                Notas          TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (PeriodoId) REFERENCES PeriodosLaborales(Id) ON DELETE CASCADE
+            )
+            """);
+
+        // "Horas Normales" del comprobante: las de un feriado trabajado, a 1×. Añadidas después
+        // de crear la tabla, así que también por migración.
+        var cpCols = GetColumnas(conn, "ComprobantesPago");
+        if (!cpCols.Contains("HorasNormales"))
+            AddColumna(conn, "ComprobantesPago", "HorasNormales", "REAL NOT NULL DEFAULT 0");
+        if (!cpCols.Contains("MontoNormales"))
+            AddColumna(conn, "ComprobantesPago", "MontoNormales", "REAL NOT NULL DEFAULT 0");
+
+        // El feriado pasa de casilla a horas (RegistrosDiasLaborales.HorasNormales, que existía y
+        // siempre se guardaba en 0). Un feriado marcado con la casilla valía la jornada diaria
+        // configurada; es lo que se le asigna. Idempotente: una vez con horas, ya no coincide.
+        EjecutarNonQuery(conn, """
+            UPDATE RegistrosDiasLaborales
+            SET HorasNormales = COALESCE((
+                    SELECT c.JornadaSemanal / MAX(c.DiasPorSemana, 1)
+                    FROM ConfiguracionLaboral c
+                    WHERE c.UsuarioId = RegistrosDiasLaborales.UsuarioId), 8)
+            WHERE EsFeriado = 1 AND HorasNormales = 0 AND HorasAusencia = 0
+            """);
+    }
+
     public ConfiguracionLaboral ObtenerConfiguracionLaboral(int usuarioId)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos
+            SELECT SalarioMensual, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos,
+                   DiasPorSemana, PorcentajeDeduccion
             FROM ConfiguracionLaboral WHERE UsuarioId=$uid
             """;
         cmd.Parameters.AddWithValue("$uid", usuarioId);
@@ -1505,13 +2239,15 @@ public class AppDatabase
             return new ConfiguracionLaboral
             {
                 UsuarioId      = usuarioId,
-                SalarioPorHora = (decimal)r.GetDouble(0),
+                SalarioMensual = (decimal)r.GetDouble(0),
                 JornadaSemanal = (decimal)r.GetDouble(1),
                 DiaPago        = r.GetInt32(2),
                 ModoPago       = r.IsDBNull(3) ? "Mensual" : r.GetString(3),
                 DiaPago2       = r.IsDBNull(4) ? 0         : r.GetInt32(4),
                 DiaSemana      = r.IsDBNull(5) ? 5         : r.GetInt32(5),
-                Viaticos       = r.IsDBNull(6) ? 0m        : (decimal)r.GetDouble(6)
+                Viaticos       = r.IsDBNull(6) ? 0m        : (decimal)r.GetDouble(6),
+                DiasPorSemana  = r.IsDBNull(7) ? 5         : r.GetInt32(7),
+                PorcentajeDeduccion = r.IsDBNull(8) ? 10.83m : (decimal)r.GetDouble(8)
             };
         return new ConfiguracionLaboral { UsuarioId = usuarioId };
     }
@@ -1521,43 +2257,39 @@ public class AppDatabase
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
-            INSERT INTO ConfiguracionLaboral (UsuarioId, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos)
-            VALUES ($uid,$sph,$js,$dp,$mp,$dp2,$ds,$vt)
+            INSERT INTO ConfiguracionLaboral (UsuarioId, SalarioMensual, SalarioPorHora, JornadaSemanal, DiaPago, ModoPago, DiaPago2, DiaSemana, Viaticos, DiasPorSemana, PorcentajeDeduccion)
+            VALUES ($uid,$sm,$sph,$js,$dp,$mp,$dp2,$ds,$vt,$dxs,$pct)
             ON CONFLICT(UsuarioId) DO UPDATE SET
-                SalarioPorHora=$sph, JornadaSemanal=$js, DiaPago=$dp,
-                ModoPago=$mp, DiaPago2=$dp2, DiaSemana=$ds, Viaticos=$vt
+                SalarioMensual=$sm, SalarioPorHora=$sph, JornadaSemanal=$js, DiaPago=$dp,
+                ModoPago=$mp, DiaPago2=$dp2, DiaSemana=$ds, Viaticos=$vt,
+                DiasPorSemana=$dxs, PorcentajeDeduccion=$pct
             """,
-            ("$uid", c.UsuarioId), ("$sph", (double)c.SalarioPorHora),
+            // SalarioPorHora ya no se lee: se escribe derivado sólo para que la columna no mienta.
+            ("$uid", c.UsuarioId), ("$sm", (double)c.SalarioMensual), ("$sph", (double)c.SalarioPorHora),
             ("$js",  (double)c.JornadaSemanal), ("$dp",  c.DiaPago),
             ("$mp",  c.ModoPago),       ("$dp2", c.DiaPago2),
-            ("$ds",  c.DiaSemana),      ("$vt",  (double)c.Viaticos));
+            ("$ds",  c.DiaSemana),      ("$vt",  (double)c.Viaticos),
+            ("$dxs", c.DiasPorSemana), ("$pct", (double)c.PorcentajeDeduccion));
     }
 
-    public List<RegistroDiaLaboral> ObtenerRegistrosDia(int usuarioId, int anio, int mes)
+    /// <summary>
+    /// Registros de un rango de fechas. Antes se pedían por mes natural, que es justo lo que no
+    /// coincide con un período quincenal: la base era de quince días y las horas, de treinta.
+    /// </summary>
+    public List<RegistroDiaLaboral> ObtenerRegistrosDia(int usuarioId, DateTime inicio, DateTime fin)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
             SELECT Id, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas,
-                   HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos
+                   HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario, Viaticos
             FROM RegistrosDiasLaborales
-            WHERE UsuarioId=$uid AND strftime('%Y',$col)=$anio AND strftime('%m',$col)=$mes
+            WHERE UsuarioId=$uid AND Fecha >= $inicio AND Fecha <= $fin
             ORDER BY Fecha
             """;
-        // trick: bind Fecha column literal separately from the date filter values
-        cmd.CommandText = """
-            SELECT Id, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas,
-                   HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos
-            FROM RegistrosDiasLaborales
-            WHERE UsuarioId=$uid
-              AND Fecha >= $inicio AND Fecha <= $fin
-            ORDER BY Fecha
-            """;
-        var inicio = new DateTime(anio, mes, 1).ToString("yyyy-MM-dd");
-        var fin    = new DateTime(anio, mes, DateTime.DaysInMonth(anio, mes)).ToString("yyyy-MM-dd");
-        cmd.Parameters.AddWithValue("$uid",   usuarioId);
-        cmd.Parameters.AddWithValue("$inicio", inicio);
-        cmd.Parameters.AddWithValue("$fin",    fin);
+        cmd.Parameters.AddWithValue("$uid",    usuarioId);
+        cmd.Parameters.AddWithValue("$inicio", inicio.ToString("yyyy-MM-dd"));
+        cmd.Parameters.AddWithValue("$fin",    fin.ToString("yyyy-MM-dd"));
 
         var list = new List<RegistroDiaLaboral>();
         using var r = cmd.ExecuteReader();
@@ -1572,7 +2304,7 @@ public class AppDatabase
                 HorasExtraNocturnas = r.GetDouble(4),
                 HorasDobles         = r.GetDouble(5),
                 EsFeriado           = r.GetInt32(6) == 1,
-                EsAusencia          = r.GetInt32(7) == 1,
+                HorasAusencia       = r.GetDouble(7),
                 TieneGoceSalario    = r.GetInt32(8) == 1,
                 Viaticos            = (decimal)r.GetDouble(9)
             });
@@ -1586,11 +2318,11 @@ public class AppDatabase
             """
             INSERT INTO RegistrosDiasLaborales
                 (UsuarioId, Fecha, HorasNormales, HorasExtraDiurnas, HorasExtraNocturnas,
-                 HorasDobles, EsFeriado, EsAusencia, TieneGoceSalario, Viaticos)
-            VALUES ($uid, $f, $hn, $hed, $hen, $hd, $ef, $ea, $tg, $vt)
+                 HorasDobles, EsFeriado, HorasAusencia, TieneGoceSalario, Viaticos)
+            VALUES ($uid, $f, $hn, $hed, $hen, $hd, $ef, $ha, $tg, $vt)
             ON CONFLICT(UsuarioId, Fecha) DO UPDATE SET
                 HorasNormales=$hn, HorasExtraDiurnas=$hed, HorasExtraNocturnas=$hen,
-                HorasDobles=$hd, EsFeriado=$ef, EsAusencia=$ea, TieneGoceSalario=$tg, Viaticos=$vt
+                HorasDobles=$hd, EsFeriado=$ef, HorasAusencia=$ha, TieneGoceSalario=$tg, Viaticos=$vt
             """,
             ("$uid", reg.UsuarioId),
             ("$f",   reg.Fecha.ToString("yyyy-MM-dd")),
@@ -1599,7 +2331,7 @@ public class AppDatabase
             ("$hen", reg.HorasExtraNocturnas),
             ("$hd",  reg.HorasDobles),
             ("$ef",  reg.EsFeriado   ? 1 : 0),
-            ("$ea",  reg.EsAusencia  ? 1 : 0),
+            ("$ha",  reg.HorasAusencia),
             ("$tg",  reg.TieneGoceSalario ? 1 : 0),
             ("$vt",  (double)reg.Viaticos));
     }
@@ -1615,10 +2347,12 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT Id, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId, Notas
+            SELECT Id, FechaInicio, FechaFin, SalarioBruto, Deducciones, SalarioNeto,
+                   Cerrado, TransaccionId, Notas,
+                   SalarioMensual, PorcentajeDeduccion, Viaticos
             FROM PeriodosLaborales
             WHERE UsuarioId=$uid
-            ORDER BY Anio DESC, Mes DESC
+            ORDER BY FechaInicio DESC
             """;
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<PeriodoLaboral>();
@@ -1628,14 +2362,17 @@ public class AppDatabase
             {
                 Id            = r.GetInt32(0),
                 UsuarioId     = usuarioId,
-                Anio          = r.GetInt32(1),
-                Mes           = r.GetInt32(2),
+                FechaInicio   = DateTime.Parse(r.GetString(1)),
+                FechaFin      = DateTime.Parse(r.GetString(2)),
                 SalarioBruto  = (decimal)r.GetDouble(3),
                 Deducciones   = (decimal)r.GetDouble(4),
                 SalarioNeto   = (decimal)r.GetDouble(5),
                 Cerrado       = r.GetInt32(6) == 1,
                 TransaccionId = r.IsDBNull(7) ? null : r.GetInt32(7),
-                Notas         = r.IsDBNull(8) ? "" : r.GetString(8)
+                Notas         = r.IsDBNull(8) ? "" : r.GetString(8),
+                SalarioMensualAlCierre      = r.IsDBNull(9)  ? null : (decimal)r.GetDouble(9),
+                PorcentajeDeduccionAlCierre = r.IsDBNull(10) ? null : (decimal)r.GetDouble(10),
+                ViaticosAlCierre            = r.IsDBNull(11) ? null : (decimal)r.GetDouble(11)
             });
         return list;
     }
@@ -1678,7 +2415,8 @@ public class AppDatabase
         cmd.CommandText = """
             SELECT Tipo, SUM(Monto), COUNT(*)
             FROM Transacciones
-            WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL
+            WHERE UsuarioId=$uid
+              AND PagoDeTarjetaId IS NULL   -- eje presupuesto: qué se ganó y en qué se gastó
               AND Fecha >= $desde AND Fecha <= $hasta
             GROUP BY Tipo
             """;
@@ -1713,7 +2451,8 @@ public class AppDatabase
             cmd.CommandText = """
                 SELECT Tipo, SUM(Monto), COUNT(*)
                 FROM Transacciones
-                WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL
+                WHERE UsuarioId=$uid
+                  AND PagoDeTarjetaId IS NULL   -- eje presupuesto
                   AND Fecha >= $desde AND Fecha <= $hasta
                 GROUP BY Tipo
                 """;
@@ -1736,7 +2475,8 @@ public class AppDatabase
             cmd.CommandText = """
                 SELECT COALESCE(SUM(CASE WHEN Tipo='Ingreso' THEN Monto ELSE -Monto END), 0)
                 FROM Transacciones
-                WHERE UsuarioId=$uid AND TarjetaCreditoId IS NULL AND Fecha <= $hasta
+                WHERE UsuarioId=$uid AND Fecha <= $hasta
+                  AND TarjetaCreditoId IS NULL   -- eje efectivo: cuánto quedó de verdad
                 """;
             cmd.Parameters.AddWithValue("$uid",   usuarioId);
             cmd.Parameters.AddWithValue("$hasta", hasta);
@@ -1748,12 +2488,15 @@ public class AppDatabase
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = """
+                -- Un período laboral ya no coincide con un mes: puede haber dos en el mismo mes
+                -- y cruzar de uno a otro. Cuenta cualquiera que se solape con el mes cerrado.
                 SELECT COUNT(*) FROM PeriodosLaborales
-                WHERE UsuarioId=$uid AND Anio=$anio AND Mes=$mes AND Cerrado=1
+                WHERE UsuarioId=$uid AND Cerrado=1
+                  AND FechaInicio <= $hasta AND FechaFin >= $desde
                 """;
-            cmd.Parameters.AddWithValue("$uid",  usuarioId);
-            cmd.Parameters.AddWithValue("$anio", anio);
-            cmd.Parameters.AddWithValue("$mes",  mes);
+            cmd.Parameters.AddWithValue("$uid",   usuarioId);
+            cmd.Parameters.AddWithValue("$desde", desde);
+            cmd.Parameters.AddWithValue("$hasta", hasta);
             periodoLaboral = (long)cmd.ExecuteScalar()! > 0;
         }
 
@@ -1822,79 +2565,116 @@ public class AppDatabase
     }
 
     /// <summary>
-    /// Consolida el resumen del período en PeriodosLaborales SIN generar ingreso automático.
-    /// TransaccionId queda NULL — el ingreso se registra por separado si el usuario lo desea.
+    /// Cierra el período SIN generar ingreso automático (TransaccionId queda NULL; el ingreso se
+    /// registra por separado). Calcula aquí, con los registros guardados y la configuración
+    /// vigente, y congela los parámetros usados: así lo cerrado no depende de lo que la pantalla
+    /// tuviera en memoria, ni cambia si después suben los viáticos o el salario.
     /// </summary>
-    public void ConsolidarPeriodoLaboral(int usuarioId, int anio, int mes,
-        decimal salarioBruto, decimal deducciones, decimal salarioNeto)
+    public CalculoPeriodo ConsolidarPeriodoLaboral(int usuarioId, DateTime inicio, DateTime fin)
+    {
+        var cfg  = ObtenerConfiguracionLaboral(usuarioId);
+        var calc = CalculoPeriodo.De(cfg, ObtenerRegistrosDia(usuarioId, inicio, fin));
+
+        using var conn = Abrir();
+        EjecutarNonQuery(conn,
+            """
+            INSERT INTO PeriodosLaborales (UsuarioId, FechaInicio, FechaFin, SalarioBruto, Deducciones,
+                                           SalarioNeto, Cerrado, SalarioMensual, PorcentajeDeduccion, Viaticos)
+            VALUES ($uid, $ini, $fin, $sb, $ded, $sn, 1, $sm, $pct, $vt)
+            ON CONFLICT(UsuarioId, FechaInicio) DO UPDATE SET
+                FechaFin=$fin, SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1,
+                SalarioMensual=$sm, PorcentajeDeduccion=$pct, Viaticos=$vt
+            """,
+            ("$uid", usuarioId),
+            ("$ini", inicio.ToString("yyyy-MM-dd")), ("$fin", fin.ToString("yyyy-MM-dd")),
+            ("$sb",  (double)calc.Bruto), ("$ded", (double)calc.Deducciones),
+            ("$sn",  (double)calc.Neto),
+            ("$sm",  (double)cfg.SalarioMensual), ("$pct", (double)cfg.PorcentajeDeduccion),
+            ("$vt",  (double)cfg.Viaticos));
+        return calc;
+    }
+
+    // ── Comprobantes de pago ──────────────────────────────────────────────────
+
+    public ComprobantePago? ObtenerComprobante(int periodoId)
+    {
+        using var conn = Abrir();
+        using var cmd  = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT SalarioFijo, HorasExtra, MontoExtra, HorasNocturnas, MontoNocturnas,
+                   HorasDobles, MontoDobles, OtrosAjustes, Viaticos, Deducciones, Notas,
+                   HorasNormales, MontoNormales
+            FROM ComprobantesPago WHERE PeriodoId=$id
+            """;
+        cmd.Parameters.AddWithValue("$id", periodoId);
+        using var r = cmd.ExecuteReader();
+        if (!r.Read()) return null;
+        return new ComprobantePago
+        {
+            PeriodoId      = periodoId,
+            SalarioFijo    = (decimal)r.GetDouble(0),
+            HorasExtra     = (decimal)r.GetDouble(1),
+            MontoExtra     = (decimal)r.GetDouble(2),
+            HorasNocturnas = (decimal)r.GetDouble(3),
+            MontoNocturnas = (decimal)r.GetDouble(4),
+            HorasDobles    = (decimal)r.GetDouble(5),
+            MontoDobles    = (decimal)r.GetDouble(6),
+            OtrosAjustes   = (decimal)r.GetDouble(7),
+            Viaticos       = (decimal)r.GetDouble(8),
+            Deducciones    = (decimal)r.GetDouble(9),
+            Notas          = r.GetString(10),
+            HorasNormales  = (decimal)r.GetDouble(11),
+            MontoNormales  = (decimal)r.GetDouble(12)
+        };
+    }
+
+    public void GuardarComprobante(ComprobantePago c)
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
-            INSERT INTO PeriodosLaborales (UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado)
-            VALUES ($uid, $a, $m, $sb, $ded, $sn, 1)
-            ON CONFLICT(UsuarioId, Anio, Mes) DO UPDATE SET
-                SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1
+            INSERT INTO ComprobantesPago (PeriodoId, SalarioFijo, HorasNormales, MontoNormales,
+                HorasExtra, MontoExtra, HorasNocturnas, MontoNocturnas, HorasDobles, MontoDobles,
+                OtrosAjustes, Viaticos, Deducciones, Notas)
+            VALUES ($id, $sf, $hno, $mno, $he, $me, $hn, $mn, $hd, $md, $oa, $vt, $ded, $notas)
+            ON CONFLICT(PeriodoId) DO UPDATE SET
+                SalarioFijo=$sf, HorasNormales=$hno, MontoNormales=$mno,
+                HorasExtra=$he, MontoExtra=$me, HorasNocturnas=$hn,
+                MontoNocturnas=$mn, HorasDobles=$hd, MontoDobles=$md, OtrosAjustes=$oa,
+                Viaticos=$vt, Deducciones=$ded, Notas=$notas
             """,
-            ("$uid", usuarioId), ("$a", anio), ("$m", mes),
-            ("$sb",  (double)salarioBruto), ("$ded", (double)deducciones),
-            ("$sn",  (double)salarioNeto));
+            ("$id", c.PeriodoId),
+            ("$sf", (double)c.SalarioFijo),
+            ("$hno", (double)c.HorasNormales), ("$mno", (double)c.MontoNormales),
+            ("$he", (double)c.HorasExtra),     ("$me", (double)c.MontoExtra),
+            ("$hn", (double)c.HorasNocturnas), ("$mn", (double)c.MontoNocturnas),
+            ("$hd", (double)c.HorasDobles),    ("$md", (double)c.MontoDobles),
+            ("$oa", (double)c.OtrosAjustes),
+            ("$vt", (double)c.Viaticos),       ("$ded", (double)c.Deducciones),
+            ("$notas", c.Notas));
     }
 
-    /// <summary>Elimina todos los registros diarios del período indicado.</summary>
-    public void ReiniciarRegistrosDia(int usuarioId, int anio, int mes)
+    public void EliminarComprobante(int periodoId)
     {
         using var conn = Abrir();
-        var mesStr = mes.ToString("D2");
+        EjecutarNonQuery(conn, "DELETE FROM ComprobantesPago WHERE PeriodoId=$id", ("$id", periodoId));
+    }
+
+    /// <summary>Elimina los registros diarios de un rango de fechas.</summary>
+    public void ReiniciarRegistrosDia(int usuarioId, DateTime inicio, DateTime fin)
+    {
+        using var conn = Abrir();
         EjecutarNonQuery(conn,
             """
             DELETE FROM RegistrosDiasLaborales
-            WHERE UsuarioId = $uid
-              AND strftime('%Y', Fecha) = $anio
-              AND strftime('%m', Fecha) = $mes
+            WHERE UsuarioId = $uid AND Fecha >= $ini AND Fecha <= $fin
             """,
-            ("$uid", usuarioId), ("$anio", anio.ToString()), ("$mes", mesStr));
+            ("$uid", usuarioId),
+            ("$ini", inicio.ToString("yyyy-MM-dd")), ("$fin", fin.ToString("yyyy-MM-dd")));
     }
-
-    public int CerrarPeriodoLaboral(int usuarioId, int anio, int mes,
-        decimal salarioBruto, decimal deducciones, decimal salarioNeto)
-    {
-        using var conn = Abrir();
-        using var tr   = conn.BeginTransaction();
-        try
-        {
-            // Insertar la transacción de ingreso
-            var fecha = new DateTime(anio, mes, DateTime.DaysInMonth(anio, mes));
-            using var cmdIns = conn.CreateCommand();
-            cmdIns.CommandText = """
-                INSERT INTO Transacciones
-                    (UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre)
-                VALUES ($uid, 'Ingreso', $monto, 'Salario', $desc, $fecha, 'Salario neto del período laboral', 'Efectivo');
-                SELECT last_insert_rowid()
-                """;
-            cmdIns.Parameters.AddWithValue("$uid",   usuarioId);
-            cmdIns.Parameters.AddWithValue("$monto", (double)salarioNeto);
-            cmdIns.Parameters.AddWithValue("$desc",  $"Salario {new DateTime(anio, mes, 1):MMMM yyyy}");
-            cmdIns.Parameters.AddWithValue("$fecha", fecha.ToString("yyyy-MM-dd"));
-            var tid = (int)(long)cmdIns.ExecuteScalar()!;
-
-            // Insertar o actualizar el período
-            EjecutarNonQuery(conn,
-                """
-                INSERT INTO PeriodosLaborales (UsuarioId, Anio, Mes, SalarioBruto, Deducciones, SalarioNeto, Cerrado, TransaccionId)
-                VALUES ($uid, $a, $m, $sb, $ded, $sn, 1, $tid)
-                ON CONFLICT(UsuarioId, Anio, Mes) DO UPDATE SET
-                    SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Cerrado=1, TransaccionId=$tid
-                """,
-                ("$uid", usuarioId), ("$a", anio), ("$m", mes),
-                ("$sb",  (double)salarioBruto), ("$ded", (double)deducciones),
-                ("$sn",  (double)salarioNeto),  ("$tid", tid));
-
-            tr.Commit();
-            return tid;
-        }
-        catch { tr.Rollback(); throw; }
-    }
+    // CerrarPeriodoLaboral() se eliminó: nunca llegó a llamarse desde ninguna pantalla y su
+    // firma quedó obsoleta al pasar los períodos a rangos de fechas. Si más adelante el cierre
+    // debe generar la transacción de salario, se escribe de nuevo contra el modelo actual.
 
     // ── Ingresos laborales directos ───────────────────────────────────────────
 
@@ -1959,11 +2739,6 @@ public class AppDatabase
             cmdIns.Parameters.AddWithValue("$cuentaId",   cuentaId.HasValue ? cuentaId.Value : DBNull.Value);
             var tid = (int)(long)cmdIns.ExecuteScalar()!;
 
-            // Actualizar saldo de cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual + $m WHERE Id=$id",
-                    ("$m", (double)monto), ("$id", cuentaId.Value));
 
             // Insertar registro de ingreso directo
             EjecutarNonQuery(conn,
@@ -2003,53 +2778,12 @@ public class AppDatabase
                 }
             }
 
-            // Revertir saldo de cuenta
-            if (cuentaId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Cuentas SET SaldoActual = SaldoActual - $m WHERE Id=$id",
-                    ("$m", monto), ("$id", cuentaId.Value));
 
             // Eliminar transacción vinculada
             if (transId.HasValue)
                 EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", transId.Value));
 
             EjecutarNonQuery(conn, "DELETE FROM IngresoLaboralDirecto WHERE Id=$id", ("$id", id));
-            tr.Commit();
-        }
-        catch { tr.Rollback(); throw; }
-    }
-
-    public void ActualizarPeriodoLaboral(int id, decimal salarioBruto, decimal deducciones,
-        decimal salarioNeto, string notas)
-    {
-        using var conn = Abrir();
-        using var tr   = conn.BeginTransaction();
-        try
-        {
-            // Leer TransaccionId actual para actualizar el monto
-            int? transId = null;
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "SELECT TransaccionId FROM PeriodosLaborales WHERE Id=$id";
-                cmd.Parameters.AddWithValue("$id", id);
-                var v = cmd.ExecuteScalar();
-                if (v is long l) transId = (int)l;
-            }
-
-            EjecutarNonQuery(conn,
-                "UPDATE PeriodosLaborales SET SalarioBruto=$sb, Deducciones=$ded, SalarioNeto=$sn, Notas=$notas WHERE Id=$id",
-                ("$sb",    (double)salarioBruto),
-                ("$ded",   (double)deducciones),
-                ("$sn",    (double)salarioNeto),
-                ("$notas", notas),
-                ("$id",    id));
-
-            // Actualizar monto de la transacción vinculada (no afecta saldo de cuenta ya que CuentaId era NULL)
-            if (transId.HasValue)
-                EjecutarNonQuery(conn,
-                    "UPDATE Transacciones SET Monto=$m WHERE Id=$id",
-                    ("$m", (double)salarioNeto), ("$id", transId.Value));
-
             tr.Commit();
         }
         catch { tr.Rollback(); throw; }
@@ -2077,5 +2811,179 @@ public class AppDatabase
             tr.Commit();
         }
         catch { tr.Rollback(); throw; }
+    }
+
+    // ── Verificación de integridad ────────────────────────────────────────────
+
+    /// <summary>
+    /// Recorre la base buscando discrepancias entre las distintas fuentes de verdad
+    /// (Transacciones, Cuentas.SaldoActual, TarjetasCredito.SaldoUsado, PagosMensuales…)
+    /// y referencias rotas. Es de solo lectura: nunca modifica datos.
+    /// Una base sana devuelve una lista vacía.
+    /// </summary>
+    public List<ProblemaIntegridad> VerificarIntegridad()
+    {
+        using var conn = Abrir();
+        var problemas = new List<ProblemaIntegridad>();
+
+        void Add(SeveridadProblema sev, string area, string desc, string detalle = "", int cant = 1) =>
+            problemas.Add(new ProblemaIntegridad
+            {
+                Severidad = sev, Area = area, Descripcion = desc, Detalle = detalle, Cantidad = cant
+            });
+
+        void Contar(string sql, SeveridadProblema sev, string area, string desc, string detalle = "")
+        {
+            var n = (int)EjecutarScalar<long>(conn, sql);
+            if (n > 0) Add(sev, area, desc, detalle, n);
+        }
+
+        // ── 1. Cuentas ──
+        // Ya no hay nada que comprobar aquí: desde la decisión D1 el saldo de una cuenta se
+        // calcula (SaldoInicial + Σ transacciones) en lugar de mantenerse como contador, así
+        // que la deriva entre el saldo mostrado y las transacciones es imposible. La
+        // comprobación que vivía aquí pasaría siempre.
+
+        // ── 2. Tarjetas ──
+        // Igual que con las cuentas en D1: desde D3 el saldo de la tarjeta se calcula
+        // (compras − pagos), así que no puede desviarse y la comprobación que vivía aquí
+        // pasaría siempre. Lo que sí tiene sentido es avisar de una deuda imposible.
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT tc.Nombre,
+                       COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.TarjetaCreditoId = tc.Id AND t.Tipo = 'Gasto'), 0)
+                     - COALESCE((SELECT SUM(t.Monto) FROM Transacciones t
+                                 WHERE t.PagoDeTarjetaId  = tc.Id), 0)
+                FROM TarjetasCredito tc
+                """;
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                var saldo = (decimal)r.GetDouble(1);
+                if (saldo < -0.01m)
+                    Add(SeveridadProblema.Advertencia, "Tarjetas",
+                        $"Se ha pagado más de lo comprado en «{r.GetString(0)}».",
+                        $"Saldo resultante: {saldo:N2}. Suele significar que falta registrar compras.");
+            }
+        }
+
+        // ── 3. Referencias rotas ──
+        // Las que el esquema declara las comprueba el propio motor, de una vez y para todas:
+        // una comprobación escrita a mano por relación se quedaría corta en cuanto se añadiera
+        // una clave nueva. Sólo puede encontrar algo si una migración dejó restos (se ejecutan
+        // con las claves desactivadas) o si alguien editó el archivo por fuera.
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA foreign_key_check";
+            var rotas = new Dictionary<string, int>();
+            using (var r = cmd.ExecuteReader())
+                while (r.Read())
+                {
+                    var clave = $"{r.GetString(0)} → {r.GetString(2)}";
+                    rotas[clave] = rotas.GetValueOrDefault(clave) + 1;
+                }
+
+            foreach (var (relacion, cuantas) in rotas)
+                Add(SeveridadProblema.Critico, "Referencias",
+                    $"Filas de «{relacion.Split('→')[0].Trim()}» apuntan a algo que ya no existe.",
+                    $"Relación {relacion}. Las claves foráneas deberían impedirlo: revisar la última migración.",
+                    cuantas);
+        }
+
+        // PagosMensuales.FijoId apunta a GastosFijos o a IngresosFijos según TipoFijo. Una clave
+        // foránea no admite dos destinos, así que esta relación sí hay que comprobarla a mano.
+        Contar("SELECT COUNT(*) FROM PagosMensuales " +
+               "WHERE TipoFijo='Gasto' AND FijoId NOT IN (SELECT Id FROM GastosFijos)",
+            SeveridadProblema.Advertencia, "Pagos fijos",
+            "Pagos mensuales de un gasto fijo que ya no existe.");
+
+        Contar("SELECT COUNT(*) FROM PagosMensuales " +
+               "WHERE TipoFijo='Ingreso' AND FijoId NOT IN (SELECT Id FROM IngresosFijos)",
+            SeveridadProblema.Advertencia, "Pagos fijos",
+            "Pagos mensuales de un ingreso fijo que ya no existe.");
+
+        // ── 4. Estados imposibles ──
+        Contar("SELECT COUNT(*) FROM PagosMensuales WHERE Pagado=1 AND TransaccionId IS NULL",
+            SeveridadProblema.Critico, "Pagos fijos",
+            "Pagos marcados como pagados sin transacción asociada.",
+            "Eliminar el ingreso fijo correspondiente provoca un fallo de la aplicación.");
+
+        Contar("SELECT COUNT(*) FROM Transacciones WHERE TarjetaCreditoId IS NOT NULL AND Tipo='Ingreso'",
+            SeveridadProblema.Critico, "Transacciones",
+            "Ingresos registrados con una tarjeta de crédito como origen.",
+            "No suman en ningún total: quedan fuera del balance, los reportes y el cierre de mes.");
+
+        Contar("SELECT COUNT(*) FROM Transacciones WHERE Monto <= 0",
+            SeveridadProblema.Advertencia, "Transacciones",
+            "Transacciones con importe cero o negativo.");
+
+        Contar("SELECT COUNT(*) FROM GastosFijos " +
+               "WHERE DiaVencimiento2 > 0 AND DiaVencimiento2 = DiaVencimiento",
+            SeveridadProblema.Critico, "Gastos fijos",
+            "Gastos fijos con el segundo día igual al primero.",
+            "Ambas filas comparten el mismo pago mensual: marcar una marca las dos y el total se duplica.");
+
+        Contar("SELECT COUNT(*) FROM IngresosFijos " +
+               "WHERE DiaIngreso2 > 0 AND DiaIngreso2 = DiaIngreso",
+            SeveridadProblema.Critico, "Ingresos fijos",
+            "Ingresos fijos con el segundo día igual al primero.",
+            "Ambas filas comparten el mismo pago mensual: marcar una marca las dos y el total se duplica.");
+
+        Contar("SELECT COUNT(*) FROM Transacciones " +
+               "WHERE Categoria NOT IN (SELECT Nombre FROM Categorias)",
+            SeveridadProblema.Advertencia, "Categorías",
+            "Transacciones con una categoría que ya no existe.",
+            "Siguen agrupándose en los gráficos pero no aparecen en el desplegable de filtro.");
+
+        Contar("SELECT COUNT(*) FROM IngresosFijos " +
+               "WHERE CuentaId IS NOT NULL AND CuentaId NOT IN (SELECT Id FROM Cuentas)",
+            SeveridadProblema.Advertencia, "Ingresos fijos",
+            "Ingresos fijos ligados a una cuenta que ya no existe.");
+
+        // ── 5. Datos de usuarios eliminados ──
+        // Ya lo cubre la comprobación de claves foráneas de arriba: UsuarioId es CASCADE en las
+        // trece tablas, así que borrar un usuario se lleva sus filas y no quedan huérfanas.
+
+        // ── 6. Cierres mensuales desactualizados ──
+        // CerrarMes() guarda una foto. Nada impide editar el mes después del cierre.
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT UsuarioId, Anio, Mes, Ingresos, Gastos FROM ResumenMensual";
+            var cierres = new List<(int Uid, int Anio, int Mes, decimal Ing, decimal Gas)>();
+            using (var r = cmd.ExecuteReader())
+                while (r.Read())
+                    cierres.Add((r.GetInt32(0), r.GetInt32(1), r.GetInt32(2),
+                                 (decimal)r.GetDouble(3), (decimal)r.GetDouble(4)));
+
+            foreach (var c in cierres)
+            {
+                var desde = new DateTime(c.Anio, c.Mes, 1);
+                var hasta = desde.AddMonths(1).AddDays(-1);
+
+                // Mismo eje que usa CerrarMes al guardar el resumen (presupuesto), o la
+                // comprobación reportaría desfases que no existen.
+                decimal Total(string tipo) => (decimal)EjecutarScalar<double>(conn,
+                    "SELECT COALESCE(SUM(Monto),0) FROM Transacciones " +
+                    "WHERE UsuarioId=$uid AND PagoDeTarjetaId IS NULL AND Tipo=$tipo " +
+                    "AND Fecha >= $desde AND Fecha <= $hasta",
+                    ("$uid", c.Uid), ("$tipo", tipo),
+                    ("$desde", desde.ToString("yyyy-MM-dd")), ("$hasta", hasta.ToString("yyyy-MM-dd")));
+
+                var ing = Total("Ingreso");
+                var gas = Total("Gasto");
+
+                if (Math.Abs(ing - c.Ing) > 0.01m || Math.Abs(gas - c.Gas) > 0.01m)
+                    Add(SeveridadProblema.Advertencia, "Cierre mensual",
+                        $"El cierre de {c.Mes:D2}/{c.Anio} ya no coincide con sus transacciones.",
+                        $"Guardado: +{c.Ing:N2} / -{c.Gas:N2} · Actual: +{ing:N2} / -{gas:N2}");
+            }
+        }
+
+        return problemas
+            .OrderBy(p => p.Severidad)
+            .ThenBy(p => p.Area)
+            .ToList();
     }
 }

@@ -10,11 +10,14 @@
     <AssemblyName>FinanzasPersonales</AssemblyName>
   </PropertyGroup>
 
-  <!-- Excluir herramientas auxiliares del build principal -->
+  <!-- Excluir herramientas auxiliares y pruebas del build principal -->
   <ItemGroup>
     <Compile Remove="Tools\**" />
     <EmbeddedResource Remove="Tools\**" />
     <None Remove="Tools\**" />
+    <Compile Remove="Tests\**" />
+    <EmbeddedResource Remove="Tests\**" />
+    <None Remove="Tests\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,7 +26,7 @@
 
   <ItemGroup>
     <PackageReference Include="MahApps.Metro" Version="2.4.11" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageReference Include="QuestPDF" Version="2025.1.0" />
   </ItemGroup>
 

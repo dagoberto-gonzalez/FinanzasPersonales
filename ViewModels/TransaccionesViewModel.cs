@@ -45,6 +45,7 @@ public class TransaccionesViewModel : BaseViewModel
             OnPropertyChanged();
             OnPropertyChanged(nameof(EsGasto));
             OnPropertyChanged(nameof(EsTarjeta));
+            RefrescarMetodosPago();
         }
     }
 
@@ -57,6 +58,39 @@ public class TransaccionesViewModel : BaseViewModel
             OnPropertyChanged();
             OnPropertyChanged(nameof(EsIngreso));
             OnPropertyChanged(nameof(EsTarjeta));
+            RefrescarMetodosPago();
+        }
+    }
+
+    private const string MetodoTarjeta = "Tarjeta";
+
+    /// <summary>
+    /// "Tarjeta" sólo tiene sentido en un gasto: una tarjeta de crédito no origina ingresos.
+    /// Antes la opción estaba siempre disponible y el ingreso resultante desaparecía de todos
+    /// los totales sin avisar.
+    /// <para>
+    /// Se quita y se pone esa única entrada en lugar de reconstruir la lista. Vaciarla dejaba
+    /// el ComboBox sin selección: WPF anula el SelectedItem al quedarse sin elementos y no
+    /// vuelve a evaluar el binding cuando se repuebla, así que el campo quedaba en blanco
+    /// aunque el ViewModel dijera "Efectivo".
+    /// </para>
+    /// </summary>
+    private void RefrescarMetodosPago()
+    {
+        if (_esIngreso)
+        {
+            if (!MetodosPago.Contains(MetodoTarjeta)) return;
+
+            // El orden es lo que importa: primero se mueve la selección, después se quita el
+            // elemento. Si se quita el elemento que está seleccionado, el ComboBox anula su
+            // selección por su cuenta y ya no vuelve a leer el binding — el ViewModel queda
+            // en "Efectivo" y el campo se ve en blanco.
+            if (_metodoPago == MetodoTarjeta) MetodoPago = "Efectivo";
+            MetodosPago.Remove(MetodoTarjeta);
+        }
+        else if (!MetodosPago.Contains(MetodoTarjeta))
+        {
+            MetodosPago.Add(MetodoTarjeta);
         }
     }
 
@@ -92,7 +126,9 @@ public class TransaccionesViewModel : BaseViewModel
         get => _metodoPago;
         set
         {
-            _metodoPago = value;
+            // Al reconstruir MetodosPago, WPF empuja null en el SelectedItem mientras la
+            // colección está vacía. Sin esta guarda el método quedaría en null.
+            _metodoPago = string.IsNullOrEmpty(value) ? "Efectivo" : value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(EsTarjeta));
             OnPropertyChanged(nameof(MostrarSubItems));
@@ -153,7 +189,8 @@ public class TransaccionesViewModel : BaseViewModel
     public ObservableCollection<string>      CategoriasFiltro { get; } = [];
     public ObservableCollection<SubItem> SubItems { get; } = [];
 
-    public IReadOnlyList<string> MetodosPago { get; } =
+    /// <summary>Se reconstruye según el tipo: ver <c>RefrescarMetodosPago</c>.</summary>
+    public ObservableCollection<string> MetodosPago { get; } =
         ["Efectivo", "Transferencia", "SINPE Móvil", "Tarjeta"];
 
     // ── Comandos ──────────────────────────────────────────────────────────────
@@ -230,10 +267,16 @@ public class TransaccionesViewModel : BaseViewModel
     {
         var cats = _db.ObtenerCategorias(_uid);
 
+        // «Tarjeta» queda fuera del formulario: marca los pagos de tarjeta, que se registran en
+        // la pantalla Tarjetas para que descuenten del saldo. Registrar uno a mano aquí lo
+        // contaría como un gasto nuevo además de la compra que ya se registró. Sí se mantiene
+        // en el filtro, para poder consultar los pagos hechos.
+        var paraFormulario = cats.Where(c => c != "Tarjeta").ToList();
+
         CategoriasForm.Clear();
-        foreach (var c in cats) CategoriasForm.Add(c);
-        if (string.IsNullOrEmpty(_categoria) || !cats.Contains(_categoria))
-            Categoria = cats.FirstOrDefault() ?? string.Empty;
+        foreach (var c in paraFormulario) CategoriasForm.Add(c);
+        if (string.IsNullOrEmpty(_categoria) || !paraFormulario.Contains(_categoria))
+            Categoria = paraFormulario.FirstOrDefault() ?? string.Empty;
 
         CategoriasFiltro.Clear();
         CategoriasFiltro.Add("Todas");
@@ -262,7 +305,9 @@ public class TransaccionesViewModel : BaseViewModel
         if (haySubItem)
         {
             cuenta = _selectedSubItem!.Nombre;
-            if (_metodoPago == "Tarjeta")
+            // La red de seguridad: aunque la UI ya oculta "Tarjeta" en los ingresos, nunca se
+            // resuelve una tarjeta para un ingreso (AppDatabase también lo rechaza).
+            if (_metodoPago == "Tarjeta" && !_esIngreso)
             {
                 // Intentar como tarjeta de crédito primero
                 var tarjetas = _db.ObtenerTarjetas(_uid);

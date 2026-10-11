@@ -39,10 +39,15 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="Salario por hora (₡)"
+                            <!-- Mensual y no por hora: la planilla paga medio mensual por quincena
+                                 y valora la hora como mensual ÷ 240. -->
+                            <TextBlock Text="Salario mensual (₡)"
                                        Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
-                            <TextBox Text="{Binding ConfigSalarioXHora, UpdateSourceTrigger=PropertyChanged}"
-                                     Tag="Ej. 3500"/>
+                            <TextBox Text="{Binding ConfigSalarioMensual, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="Salario fijo × 2"/>
+                            <TextBlock Text="{Binding ValorHoraTexto}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="2">
@@ -50,6 +55,16 @@
                                        Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding ConfigJornada, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="48"/>
+                            <!-- Los días que se trabajan estaban clavados en 6 dentro del cálculo:
+                                 con semana de 5 la hora diaria salía un 20 % baja, y con ella
+                                 el valor de cada feriado y de cada ausencia. -->
+                            <TextBlock Text="Días que trabajás por semana"
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,12,0,5"/>
+                            <TextBox Text="{Binding ConfigDiasPorSemana, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="5"/>
+                            <TextBlock Text="{Binding HorasDiariasTexto}"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="4">
@@ -112,6 +127,11 @@
                                        Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding ConfigViaticos, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="0"/>
+                            <!-- La deducción cambia por ley y estaba escrita a mano como 10,67 %. -->
+                            <TextBlock Text="Deducción sobre el bruto (%)"
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,12,0,5"/>
+                            <TextBox Text="{Binding ConfigPorcentaje, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="10.83"/>
                         </StackPanel>
 
                         <!-- Botón siempre visible -->
@@ -141,10 +161,45 @@
                 <!-- Registro del período -->
                 <Border Grid.Column="0" Style="{StaticResource Card}">
                     <StackPanel>
-                        <TextBlock FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14">
-                            <Run Text="Registro — "/>
-                            <Run Text="{Binding PeriodoActualLabel, Mode=OneWay}"/>
-                        </TextBlock>
+                        <!-- Navegación entre períodos. Antes la pantalla quedaba clavada al mes
+                             en que se construyó la vista, que además se cachea: no había forma
+                             de consultar una quincena anterior. -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Button Grid.Column="0" Content="‹"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Padding="12,2" FontSize="16"
+                                    VerticalAlignment="Center"
+                                    ToolTip="Período anterior"
+                                    Command="{Binding PeriodoAnteriorCommand}"/>
+
+                            <TextBlock Grid.Column="1" FontSize="15" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Text="{Binding PeriodoActualLabel, Mode=OneWay}"/>
+
+                            <Button Grid.Column="2" Content="›"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Padding="12,2" FontSize="16"
+                                    VerticalAlignment="Center"
+                                    ToolTip="Período siguiente"
+                                    Command="{Binding PeriodoSiguienteCommand}"/>
+                        </Grid>
+
+                        <TextBlock Text="{Binding PeriodoRangoTexto}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+
+                        <Button Content="Volver al período actual"
+                                Style="{StaticResource SecondaryButton}"
+                                Padding="12,4" FontSize="11"
+                                HorizontalAlignment="Center" Margin="0,0,0,12"
+                                Visibility="{Binding VolverAlActualVisibility}"
+                                Command="{Binding PeriodoActualCommand}"/>
 
                         <!-- Formulario agregar -->
                         <Border Background="{StaticResource SurfaceBrush}"
@@ -157,6 +212,8 @@
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="120"/>
+                                        <ColumnDefinition Width="10"/>
+                                        <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="10"/>
                                         <ColumnDefinition Width="90"/>
                                         <ColumnDefinition Width="10"/>
@@ -188,17 +245,38 @@
                                         <TextBox Text="{Binding RegHorasDobles, UpdateSourceTrigger=PropertyChanged}"
                                                  Tag="0" FontSize="12"/>
                                     </StackPanel>
+
+                                    <!-- Horas trabajadas en feriado, pagadas a 1× sobre el salario fijo
+                                         ("Horas Normales" en la planilla). Antes era una casilla
+                                         que valía siempre la jornada diaria. -->
+                                    <StackPanel Grid.Column="8">
+                                        <TextBlock Text="H. Feriado" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,0,0,4"/>
+                                        <TextBox Text="{Binding RegHorasFeriado, UpdateSourceTrigger=PropertyChanged}"
+                                                 Tag="0" FontSize="12"/>
+                                    </StackPanel>
                                 </Grid>
 
                                 <!-- Checkboxes -->
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,10">
-                                    <CheckBox Content="Feriado (200%)" IsChecked="{Binding RegEsFeriado}"
-                                              Foreground="{StaticResource TextBrush}" Margin="0,0,20,0"/>
                                     <CheckBox Content="Ausencia" IsChecked="{Binding RegEsAusencia}"
                                               Foreground="{StaticResource TextBrush}" Margin="0,0,20,0"/>
                                     <CheckBox Content="Con goce de salario" IsChecked="{Binding RegTieneGoce}"
                                               Foreground="{StaticResource GreenBrush}"
                                               Visibility="{Binding GoceVisibility}"/>
+                                </StackPanel>
+
+                                <!-- La ausencia se mide en horas: antes era día completo o nada,
+                                     así que faltar tres horas no se podía registrar. -->
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10"
+                                            Visibility="{Binding GoceVisibility}">
+                                    <TextBlock Text="Horas que faltaste:"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Text="{Binding RegHorasAusencia, UpdateSourceTrigger=PropertyChanged}"
+                                             Tag="día completo" FontSize="12" Width="110"/>
+                                    <TextBlock Text="Vacío = el día entero"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </StackPanel>
 
                                 <TextBlock Text="{Binding RegError}"
@@ -232,7 +310,7 @@
                                 </DataGridTextColumn>
                                 <DataGridTextColumn Header="Tipo"
                                                     Binding="{Binding TipoDisplay}"
-                                                    Width="140">
+                                                    Width="*" MinWidth="150">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock"><Setter Property="Padding" Value="6,0"/></Style>
                                     </DataGridTextColumn.ElementStyle>
@@ -310,9 +388,10 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="Base estimada (período completo)"
+                                <TextBlock Text="Salario fijo del período"
                                            Foreground="{StaticResource TextMutedBrush}"
-                                           FontSize="11" VerticalAlignment="Center"/>
+                                           FontSize="11" VerticalAlignment="Center"
+                                           TextWrapping="Wrap" Margin="0,0,8,0"/>
                                 <TextBlock Grid.Column="1" Text="{Binding ResumenSalarioBase}"
                                            FontSize="13" FontWeight="Bold"
                                            Foreground="{StaticResource AccentLightBrush}"/>
@@ -340,20 +419,20 @@
                         </Grid>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBlock Text="Feriados trabajados" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            <TextBlock Text="Feriados (horas a 1×)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
                             <TextBlock Grid.Column="1" Text="{Binding ResumenFeriados}" FontSize="12"/>
                         </Grid>
                         <Grid Margin="0,0,0,4">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <TextBlock Text="Viáticos del período" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
-                            <TextBlock Grid.Column="1" Text="{Binding ResumenViaticos}" FontSize="12"
-                                       Foreground="{StaticResource GreenBrush}"/>
-                        </Grid>
-                        <Grid Margin="0,0,0,12">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBlock Text="Ausencias sin goce (desc.)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
                             <TextBlock Grid.Column="1" Text="{Binding ResumenDescAusencias}" FontSize="12"
                                        Foreground="{StaticResource RedBrush}"/>
+                        </Grid>
+                        <!-- No descuentan, pero sin esta fila una ausencia con goce no se veía en el resumen. -->
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="Ausencias con goce (no desc.)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            <TextBlock Grid.Column="1" Text="{Binding ResumenAusenciaGoce}" FontSize="12"/>
                         </Grid>
 
                         <!-- Salario -->
@@ -369,6 +448,14 @@
                             <TextBlock Text="CCSS obrero" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
                             <TextBlock Grid.Column="1" Text="{Binding ResumenDeduccionCCSS}" FontSize="12"
                                        Foreground="{StaticResource RedBrush}"/>
+                        </Grid>
+                        <!-- Después de la C.C.S.S. y fuera del bruto, como en el comprobante: los
+                             viáticos no pagan deducción. Antes se sumaban al bruto y la pagaban. -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="Viáticos (sin deducción)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            <TextBlock Grid.Column="1" Text="{Binding ResumenViaticos}" FontSize="12"
+                                       Foreground="{StaticResource GreenBrush}"/>
                         </Grid>
 
                         <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,8,0,8"/>
@@ -451,62 +538,187 @@
                         </StackPanel>
                     </Grid>
 
-                    <!-- ── Formulario: Editar cierre ─────────────────────────────── -->
+                    <!-- ── Formulario: Comprobante de pago ──────────────────────────
+                         Sustituye a "Editar cierre", que sobrescribía lo calculado con lo pagado.
+                         Se copia el comprobante tal como viene y la comparación se rehace con
+                         cada tecla; lo calculado no se toca. -->
                     <Border CornerRadius="8" Padding="16,14" Margin="0,0,0,16"
                             Background="{StaticResource SurfaceBrush}"
-                            Visibility="{Binding EditFormVisibility}">
+                            Visibility="{Binding ComprobanteVisibility}">
                         <StackPanel>
-                            <TextBlock Text="{Binding EditTituloLabel}" FontSize="13" FontWeight="SemiBold"
+                            <TextBlock Text="{Binding ComprobanteTitulo}" FontSize="13" FontWeight="SemiBold"
+                                       Margin="0,0,0,4"/>
+                            <TextBlock Text="Copiá las líneas del comprobante. Lo que no venga, dejalo vacío."
+                                       Foreground="{StaticResource TextMutedBrush}" FontSize="11"
                                        Margin="0,0,0,12"/>
-                            <Grid Margin="0,0,0,10">
+
+                            <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="16"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="16"/>
+                                    <ColumnDefinition Width="360"/>
+                                    <ColumnDefinition Width="24"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Salario bruto"
-                                               Foreground="{StaticResource TextMutedBrush}"
-                                               FontSize="12" Margin="0,0,0,4"/>
-                                    <TextBox Text="{Binding EditBruto, UpdateSourceTrigger=PropertyChanged}"
-                                             Tag="0"/>
-                                </StackPanel>
+
+                                <!-- Lo que dice el comprobante -->
+                                <Grid Grid.Column="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="120"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.Resources>
+                                        <!-- Más compactas que las del resto de la app (42 px): son
+                                             nueve filas y quedaban el doble de altas que la comparación. -->
+                                        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                            <Setter Property="MinHeight" Value="30"/>
+                                            <Setter Property="Padding"   Value="8,3"/>
+                                            <Setter Property="FontSize"  Value="12"/>
+                                            <Setter Property="Margin"    Value="0,0,0,4"/>
+                                        </Style>
+                                        <Style TargetType="TextBlock" x:Key="EtiquetaComp">
+                                            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                            <Setter Property="FontSize" Value="12"/>
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                        </Style>
+                                    </Grid.Resources>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="Cantidad" Style="{StaticResource EtiquetaComp}" FontSize="11" Margin="0,0,0,4"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="3" Text="Total" Style="{StaticResource EtiquetaComp}" FontSize="11" Margin="0,0,0,4"/>
+
+                                    <TextBlock Grid.Row="1" Text="Salario fijo" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="1" Grid.Column="3" Margin="0,0,0,6" Tag="215 115,38"
+                                               Text="{Binding CompSalarioFijo, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="2" Text="Horas normales (feriado)" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="2" Grid.Column="1" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompHorasNormales, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBox   Grid.Row="2" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompMontoNormales, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="3" Text="Horas extra" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="3" Grid.Column="1" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompHorasExtra, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBox   Grid.Row="3" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompMontoExtra, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="4" Text="Horas nocturnas" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="4" Grid.Column="1" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompHorasNoct, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBox   Grid.Row="4" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompMontoNoct, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="5" Text="Horas dobles" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="5" Grid.Column="1" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompHorasDobles, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBox   Grid.Row="5" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompMontoDobles, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="6" Text="Otros (rebajos en negativo)" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="6" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompOtros, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="7" Text="Viáticos" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="7" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompViaticos, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="8" Text="C.C.S.S." Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="8" Grid.Column="3" Margin="0,0,0,6" Tag="0"
+                                               Text="{Binding CompDeducciones, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="9" Text="Notas" Style="{StaticResource EtiquetaComp}"/>
+                                    <TextBox   Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Tag="N.º de comprobante…"
+                                               Text="{Binding CompNotas, UpdateSourceTrigger=PropertyChanged}"/>
+                                </Grid>
+
+                                <!-- La comparación -->
                                 <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Deducciones CCSS"
-                                               Foreground="{StaticResource TextMutedBrush}"
-                                               FontSize="12" Margin="0,0,0,4"/>
-                                    <TextBox Text="{Binding EditDeducciones, UpdateSourceTrigger=PropertyChanged}"
-                                             Tag="0"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="4">
-                                    <TextBlock Text="Salario neto"
-                                               Foreground="{StaticResource TextMutedBrush}"
-                                               FontSize="12" Margin="0,0,0,4"/>
-                                    <TextBox Text="{Binding EditNeto, UpdateSourceTrigger=PropertyChanged}"
-                                             Tag="0"/>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="110"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="1" Text="Horas reg. → pag." FontSize="11" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Right"/>
+                                        <TextBlock Grid.Column="2" Text="Calculado" FontSize="11" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Right"/>
+                                        <TextBlock Grid.Column="3" Text="Pagado" FontSize="11" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Right"/>
+                                        <TextBlock Grid.Column="4" Text="Diferencia" FontSize="11" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Right"/>
+                                    </Grid>
+                                    <ItemsControl ItemsSource="{Binding Comparacion}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,0,0,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="110"/>
+                                                        <ColumnDefinition Width="110"/>
+                                                        <ColumnDefinition Width="110"/>
+                                                        <ColumnDefinition Width="110"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.Style>
+                                                        <Style TargetType="Grid">
+                                                            <Setter Property="TextElement.FontWeight" Value="Normal"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding EsTotal}" Value="True">
+                                                                    <Setter Property="TextElement.FontWeight" Value="Bold"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Grid.Style>
+                                                    <TextBlock Text="{Binding Concepto}" FontSize="12"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding HorasTexto}" FontSize="12" HorizontalAlignment="Right"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding CalculadoTexto}" FontSize="12" HorizontalAlignment="Right"/>
+                                                    <TextBlock Grid.Column="3" Text="{Binding PagadoTexto}" FontSize="12" HorizontalAlignment="Right"/>
+                                                    <TextBlock Grid.Column="4" Text="{Binding DiferenciaTexto}" FontSize="12" HorizontalAlignment="Right">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Cuadra}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
                             </Grid>
-                            <StackPanel Margin="0,0,0,12">
-                                <TextBlock Text="Notas (opcional)"
-                                           Foreground="{StaticResource TextMutedBrush}"
-                                           FontSize="12" Margin="0,0,0,4"/>
-                                <TextBox Text="{Binding EditNotas, UpdateSourceTrigger=PropertyChanged}"
-                                         Tag="Observaciones…" Width="400" HorizontalAlignment="Left"/>
-                            </StackPanel>
-                            <TextBlock Text="{Binding EditError}"
+
+                            <TextBlock Text="{Binding CompError}"
                                        Foreground="{StaticResource RedBrush}"
-                                       FontSize="12" Margin="0,0,0,8"
-                                       Visibility="{Binding EditErrorVisibility}"/>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="Guardar cambios"
+                                       FontSize="12" Margin="0,8,0,0"
+                                       Visibility="{Binding CompErrorVisibility}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="Guardar comprobante"
                                         Style="{StaticResource PrimaryButton}"
-                                        Command="{Binding GuardarEdicionCommand}"
+                                        Command="{Binding GuardarComprobanteCommand}"
                                         Padding="12,8" Margin="0,0,10,0"/>
                                 <Button Content="Cancelar"
                                         Style="{StaticResource NavButton}"
-                                        Command="{Binding CancelarEdicionCommand}"
+                                        Command="{Binding CerrarComprobanteCommand}"
+                                        Padding="12,8" Margin="0,0,10,0"/>
+                                <Button Content="Quitar comprobante"
+                                        Style="{StaticResource NavButton}"
+                                        Foreground="{StaticResource RedBrush}"
+                                        Command="{Binding BorrarComprobanteCommand}"
                                         Padding="12,8"/>
                             </StackPanel>
                         </StackPanel>
@@ -524,21 +736,22 @@
                               MaxHeight="340"
                               Visibility="{Binding ConHistorialVisibility}">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Fecha / Período" Binding="{Binding Label}"      Width="*"/>
-                            <DataGridTextColumn Header="Tipo"            Binding="{Binding TipoDisplay}" Width="130"/>
-                            <DataGridTextColumn Header="Bruto"           Binding="{Binding BrutoDisplay}" Width="115"/>
-                            <DataGridTextColumn Header="Deducciones"     Binding="{Binding DeduccionesDisplay}" Width="115"/>
-                            <DataGridTextColumn Header="Neto / Monto"    Binding="{Binding MontoDisplay}" Width="115"/>
-                            <DataGridTextColumn Header="Acumulado"       Binding="{Binding BalanceDisplay}" Width="115"/>
-                            <DataGridTemplateColumn Header="Acciones" Width="130">
+                            <DataGridTextColumn Header="Fecha / Período" Binding="{Binding Label}"      Width="*" MinWidth="150"/>
+                            <DataGridTextColumn Header="Tipo"            Binding="{Binding TipoDisplay}" Width="115"/>
+                            <DataGridTextColumn Header="Bruto"           Binding="{Binding BrutoDisplay}" Width="105"/>
+                            <DataGridTextColumn Header="Deducciones"     Binding="{Binding DeduccionesDisplay}" Width="105"/>
+                            <DataGridTextColumn Header="Neto / Monto"    Binding="{Binding MontoDisplay}" Width="105"/>
+                            <DataGridTextColumn Header="Acumulado"       Binding="{Binding BalanceDisplay}" Width="105"/>
+                            <DataGridTextColumn Header="Comprobante"     Binding="{Binding Comprobante}" Width="140"/>
+                            <DataGridTemplateColumn Header="Acciones" Width="160">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal">
-                                            <!-- Editar: solo para cierres de período -->
-                                            <Button Content="Editar"
+                                            <!-- Comprobante: solo para cierres de período -->
+                                            <Button Content="Comprobante"
                                                     FontSize="11" Padding="6,3" Margin="0,0,6,0"
                                                     Style="{StaticResource NavButton}"
-                                                    Command="{Binding DataContext.EditarCierreCommand,
+                                                    Command="{Binding DataContext.AbrirComprobanteCommand,
                                                               RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                     CommandParameter="{Binding}"
                                                     Visibility="{Binding EsCierre,
