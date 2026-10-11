@@ -112,6 +112,12 @@ single figure was the source of the inconsistencies between screens. `Transaccio
 - **`AfectaEfectivo`** (`TarjetaCreditoId IS NULL`) drives account balances and the dashboard's
   *Disponible*. A card purchase does not move money until the card is paid.
 
+**Editing a transaction** (`ActualizarTransaccion`) is a plain `UPDATE` with the same rules as
+inserting (`ValidarTransaccion`) — balances follow on their own. Two kinds are refused, by
+`MotivoNoEditable`: card payments (`PagoDeTarjetaId`, owned by the Tarjetas screen) and Control
+Laboral income (`IngresoLaboralDirecto`/`PeriodosLaborales` keep their own copy of the amount).
+A fixed item's payment *is* editable: `PagosMensuales` stores no amount, it reads the transaction's.
+
 Whenever you sum transactions, **say which axis you mean** — never filter on `TarjetaCreditoId`
 by hand for a "totals" query. A row may not be both a card purchase and a card payment;
 `InsertarTransaccion` rejects that.
@@ -244,8 +250,8 @@ viáticos are added to the net. The payroll rounds inconsistently, so comparison
 `Transacciones` is the ledger, and since D1/D3 account and card balances are derived from it, so
 they cannot drift. What is still kept by hand: `MetasAhorro.MontoActual` (D5 pending — a purely
 decorative counter today), `PeriodosLaborales`, and the `ResumenMensual` snapshots, which nothing
-recomputes when the month behind them changes. There are also no foreign keys, so deleting a row
-can leave others pointing at it.
+recomputes when the month behind them changes. Dangling references are prevented by the foreign
+keys (see "Foreign keys" above) and reported by `PRAGMA foreign_key_check`.
 
 `AppDatabase.VerificarIntegridad()` is the missing reconciliation. It is **read-only — it
 reports, it never repairs** — and returns `List<ProblemaIntegridad>` covering: `PRAGMA

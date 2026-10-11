@@ -1216,25 +1216,7 @@ public class AppDatabase
 
     public void InsertarTransaccion(Transaccion t, int usuarioId)
     {
-        // Una tarjeta de crédito es una fuente de deuda, no de ingresos.
-        if (t.Tipo == "Ingreso" && t.TarjetaCreditoId.HasValue)
-            throw new ArgumentException(
-                "Un ingreso no puede tener una tarjeta de crédito como origen.", nameof(t));
-
-        // Comprar con la tarjeta y pagar la tarjeta son movimientos opuestos: una misma fila no
-        // puede ser los dos, o se contaría en los dos ejes a la vez.
-        if (t.TarjetaCreditoId.HasValue && t.PagoDeTarjetaId.HasValue)
-            throw new ArgumentException(
-                "Una transacción no puede ser a la vez compra con tarjeta y pago de tarjeta.", nameof(t));
-
-        // La categoría «Tarjeta» identifica los pagos de tarjeta, y un pago SIEMPRE tiene que
-        // decir qué tarjeta salda. Si no, se contaría como un gasto nuevo además de la compra
-        // que ya se registró: el mismo dinero dos veces. Los pagos se registran en la pantalla
-        // de Tarjetas, que es la única que conoce el saldo pendiente.
-        if (t.Categoria == "Tarjeta" && !t.PagoDeTarjetaId.HasValue)
-            throw new ArgumentException(
-                "Los pagos de tarjeta se registran desde la pantalla Tarjetas, para que se " +
-                "descuenten del saldo y no se cuenten dos veces.", nameof(t));
+        ValidarTransaccion(t);
 
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
@@ -1257,6 +1239,97 @@ public class AppDatabase
 
         // No se ajusta ningún contador: ni el saldo de la cuenta ni el de la tarjeta.
         // Los dos se derivan de estas mismas filas al leerlos (decisiones D1 y D3).
+    }
+
+    /// <summary>
+    /// Por qué una transacción no se puede editar desde la pantalla Transacciones, o null si se
+    /// puede. Las que generan otras pantallas y guardan su propia copia de los datos se
+    /// gestionan allí: editarlas aquí dejaría las dos versiones distintas.
+    /// <para>
+    /// Las de un gasto o ingreso fijo SÍ se pueden editar: <c>PagosMensuales</c> no guarda el
+    /// monto, lo lee de la transacción.
+    /// </para>
+    /// </summary>
+    public string? MotivoNoEditable(int transaccionId)
+    {
+        using var conn = Abrir();
+
+        if (EjecutarScalar<long>(conn,
+                "SELECT COUNT(*) FROM Transacciones WHERE Id=$id AND PagoDeTarjetaId IS NOT NULL",
+                ("$id", transaccionId)) > 0)
+            return "Es un pago de tarjeta: se gestiona desde la pantalla Tarjetas, que es la que " +
+                   "lleva la deuda pendiente.";
+
+        if (EjecutarScalar<long>(conn,
+                "SELECT (SELECT COUNT(*) FROM IngresoLaboralDirecto WHERE TransaccionId=$id) " +
+                "     + (SELECT COUNT(*) FROM PeriodosLaborales     WHERE TransaccionId=$id)",
+                ("$id", transaccionId)) > 0)
+            return "Es un ingreso de Control Laboral, que guarda su propio monto: se gestiona " +
+                   "desde el historial de Control Laboral.";
+
+        return null;
+    }
+
+    /// <summary>
+    /// Edita una transacción con las mismas reglas que al crearla. Como los saldos de cuentas y
+    /// tarjetas se derivan de las transacciones (D1, D3), no hay nada más que ajustar: cambiar el
+    /// monto, la cuenta o la tarjeta mueve los saldos solo.
+    /// <para>
+    /// <c>PagoDeTarjetaId</c> no se toca: los pagos de tarjeta no se editan aquí.
+    /// </para>
+    /// </summary>
+    public void ActualizarTransaccion(Transaccion t, int usuarioId)
+    {
+        ValidarTransaccion(t);
+        if (MotivoNoEditable(t.Id) is { } motivo)
+            throw new InvalidOperationException(motivo);
+
+        using var conn = Abrir();
+        var filas = EjecutarScalar<long>(conn,
+            """
+            UPDATE Transacciones SET
+                Tipo=$tipo, Monto=$monto, Categoria=$cat, Descripcion=$desc, Fecha=$fecha,
+                Notas=$notas, CuentaNombre=$cuenta, TarjetaCreditoId=$tarjeta, CuentaId=$cuentaid
+            WHERE Id=$id AND UsuarioId=$uid;
+            SELECT changes()
+            """,
+            ("$id", t.Id), ("$uid", usuarioId),
+            ("$tipo", t.Tipo), ("$monto", (double)t.Monto), ("$cat", t.Categoria),
+            ("$desc", t.Descripcion), ("$fecha", t.Fecha.ToString("yyyy-MM-dd")),
+            ("$notas", t.Notas), ("$cuenta", t.CuentaNombre),
+            ("$tarjeta",  t.TarjetaCreditoId.HasValue ? t.TarjetaCreditoId.Value : DBNull.Value),
+            ("$cuentaid", t.CuentaId.HasValue         ? t.CuentaId.Value         : DBNull.Value));
+
+        // Otro usuario, o una fila que ya no existe: no se cambia nada en silencio.
+        if (filas == 0)
+            throw new InvalidOperationException("La transacción ya no existe.");
+    }
+
+    /// <summary>Reglas comunes a crear y editar una transacción.</summary>
+    private static void ValidarTransaccion(Transaccion t)
+    {
+        if (t.Monto <= 0)
+            throw new ArgumentException("El monto tiene que ser mayor que cero.", nameof(t));
+
+        // Una tarjeta de crédito es una fuente de deuda, no de ingresos.
+        if (t.Tipo == "Ingreso" && t.TarjetaCreditoId.HasValue)
+            throw new ArgumentException(
+                "Un ingreso no puede tener una tarjeta de crédito como origen.", nameof(t));
+
+        // Comprar con la tarjeta y pagar la tarjeta son movimientos opuestos: una misma fila no
+        // puede ser los dos, o se contaría en los dos ejes a la vez.
+        if (t.TarjetaCreditoId.HasValue && t.PagoDeTarjetaId.HasValue)
+            throw new ArgumentException(
+                "Una transacción no puede ser a la vez compra con tarjeta y pago de tarjeta.", nameof(t));
+
+        // La categoría «Tarjeta» identifica los pagos de tarjeta, y un pago SIEMPRE tiene que
+        // decir qué tarjeta salda. Si no, se contaría como un gasto nuevo además de la compra
+        // que ya se registró: el mismo dinero dos veces. Los pagos se registran en la pantalla
+        // de Tarjetas, que es la única que conoce el saldo pendiente.
+        if (t.Categoria == "Tarjeta" && !t.PagoDeTarjetaId.HasValue)
+            throw new ArgumentException(
+                "Los pagos de tarjeta se registran desde la pantalla Tarjetas, para que se " +
+                "descuenten del saldo y no se cuenten dos veces.", nameof(t));
     }
 
     public List<Transaccion> ObtenerTransacciones(int usuarioId)
