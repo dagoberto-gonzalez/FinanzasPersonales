@@ -41,7 +41,12 @@
             <!-- Formulario nuevo gasto fijo -->
             <Border Style="{StaticResource Card}" Margin="0,0,0,24">
                 <StackPanel>
-                    <TextBlock Text="Agregar gasto fijo" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Text="{Binding TituloFormulario}" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <!-- Editar no reescribe lo ya pagado: cada pago es una transacción propia. -->
+                    <TextBlock Text="Los cambios valen desde el próximo pago. Lo ya pagado se corrige en Transacciones."
+                               Foreground="{StaticResource YellowBrush}" FontSize="11"
+                               TextWrapping="Wrap" Margin="0,0,0,4"
+                               Visibility="{Binding EditandoVisibility}"/>
                     <TextBlock Text="El pago de una tarjeta de crédito no va aquí: se registra en la pantalla Tarjetas, donde se descuenta del saldo pendiente. Lo que compraste con la tarjeta ya cuenta como gasto en el mes de la compra."
                                Foreground="{StaticResource TextMutedBrush}"
                                FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
@@ -55,6 +60,7 @@
                             <ColumnDefinition Width="12"/>
                             <ColumnDefinition Width="90"/>
                             <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
@@ -71,10 +77,16 @@
                                  Text="{Binding DiaVencimiento2, UpdateSourceTrigger=PropertyChanged}"
                                  Tag="Día 2 (opc.)"/>
                         <Button Grid.Column="8"
-                                Content="Agregar"
+                                Content="{Binding TextoGuardar}"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding GuardarCommand}"
                                 Padding="18,10"/>
+                        <Button Grid.Column="9"
+                                Content="Cancelar"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CancelarEdicionCommand}"
+                                Padding="14,10" Margin="8,0,0,0"
+                                Visibility="{Binding EditandoVisibility}"/>
                     </Grid>
 
                     <TextBlock Text="{Binding MensajeError}"
@@ -132,7 +144,7 @@
                                                             <ColumnDefinition Width="160"/>
                                                             <ColumnDefinition Width="12"/>
                                                             <ColumnDefinition Width="Auto"/>
-                                                            <ColumnDefinition Width="8"/>
+                                                            <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="Auto"/>
                                                         </Grid.ColumnDefinitions>
 
@@ -234,7 +246,16 @@
                                                             </TextBlock>
                                                         </Border>
 
-                                                        <!-- Eliminar -->
+                                                        <!-- Editar + Eliminar -->
+                                                        <Button Grid.Column="7"
+                                                                Content="✎"
+                                                                ToolTip="Editar"
+                                                                Style="{StaticResource SecondaryButton}"
+                                                                Padding="8,4" Margin="8,0,8,0"
+                                                                VerticalAlignment="Center"
+                                                                Command="{Binding DataContext.EditarCommand,
+                                                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                CommandParameter="{Binding}"/>
                                                         <Button Grid.Column="8"
                                                                 Content="✕"
                                                                 Style="{StaticResource DangerButton}"

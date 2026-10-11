@@ -198,6 +198,13 @@ These are enforced in `AppDatabase` (not just in the UI), so breaking them fails
 - **An `Ingreso` can never carry a `TarjetaCreditoId`** — `InsertarTransaccion` throws. Every
   total in the app excludes transactions with a card, so such a row would be invisible money.
   The Transacciones screen also drops "Tarjeta" from the method list when the type is Ingreso.
+- **Changing a fixed item's days moves its recorded payments** (`ReubicarPagos`, called by
+  `ActualizarGastoFijo` / `ActualizarIngresoFijo`). `PagosMensuales` keys a payment by its day,
+  so moving the due date from 10 to 15 without moving the row would show an already-paid month as
+  pending and invite paying it twice. Kept days keep their rows; a removed day hands its rows to
+  the day that replaces it (via negative days, so swapping 10↔25 does not hit the unique key); a
+  removed day with no replacement drops its unpaid rows and keeps paid ones as history. Editing
+  the amount or account never rewrites past payments — each is its own transaction.
 - **A fixed item's second day can never equal the first** — `InsertarGastoFijo` /
   `InsertarIngresoFijo` normalise it to 0. Two equal days produce two UI rows sharing one
   `PagosMensuales` row (the unique key includes `Dia`), so the amount gets counted twice.
