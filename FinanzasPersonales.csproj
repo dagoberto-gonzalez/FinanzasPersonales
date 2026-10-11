@@ -24,6 +24,11 @@
     <Resource Include="Assets\dmt-logo.png"/>
   </ItemGroup>
 
+  <!-- Las pruebas bajan Contrasenas.Iteraciones: crean un usuario por prueba. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="FinanzasPersonales.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="MahApps.Metro" Version="2.4.11" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />

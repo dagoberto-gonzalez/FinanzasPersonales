@@ -37,6 +37,7 @@ public partial class LoginWindow : Window
     {
         var regWin = new RegistroWindow(_db);
         regWin.ShowDialog();
-        // Si se registró exitosamente, prellenar el usuario
+        // Si era la primera cuenta, el aviso de "crea la primera cuenta" ya no aplica.
+        _vm.ActualizarSinCuentas();
     }
 }

@@ -35,6 +35,22 @@ public class LoginViewModel : BaseViewModel
             ? System.Windows.Visibility.Collapsed
             : System.Windows.Visibility.Visible;
 
+    /// <summary>
+    /// Instalación nueva: no hay ninguna cuenta. Antes se creaba sola una "Admin" con la
+    /// contraseña admin123 escrita en el código; ahora la crea quien instala, registrándose.
+    /// </summary>
+    public bool SinCuentas { get; private set; }
+    public System.Windows.Visibility SinCuentasVisibility =>
+        SinCuentas ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+
+    /// <summary>Se vuelve a mirar al volver del registro.</summary>
+    public void ActualizarSinCuentas()
+    {
+        SinCuentas = _db.ContarUsuarios() == 0;
+        OnPropertyChanged(nameof(SinCuentas));
+        OnPropertyChanged(nameof(SinCuentasVisibility));
+    }
+
     public ICommand IniciarSesionCommand { get; }
 
     public event Action? LoginExitoso;
@@ -43,6 +59,7 @@ public class LoginViewModel : BaseViewModel
     {
         _db = db;
         IniciarSesionCommand = new RelayCommand(Autenticar);
+        ActualizarSinCuentas();
     }
 
     private void Autenticar()
