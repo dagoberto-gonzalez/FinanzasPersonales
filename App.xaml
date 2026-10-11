@@ -224,11 +224,19 @@
                                 CornerRadius="8"
                                 Padding="{TemplateBinding Padding}">
                             <Grid>
-                                <!-- Placeholder usando Tag: visible sólo cuando Text == "" -->
+                                <!-- Placeholder usando Tag: visible sólo cuando Text == "".
+                                     WPF aplica el Padding al texto escrito DOS veces: aquí, en el
+                                     Border, y otra vez por su cuenta dentro de PART_ContentHost,
+                                     más 2 px propios. El placeholder sólo recibía la primera, así
+                                     que empezaba ~12 px antes que el texto y el cursor caía a la
+                                     derecha de su primera letra. Margin = Padding y Padding 2 lo
+                                     ponen exactamente donde empieza lo que se escribe. -->
                                 <TextBlock x:Name="placeholder"
                                            Text="{TemplateBinding Tag}"
                                            Foreground="#6C7086"
                                            FontSize="{TemplateBinding FontSize}"
+                                           Margin="{TemplateBinding Padding}"
+                                           Padding="2,0,0,0"
                                            VerticalAlignment="Center"
                                            IsHitTestVisible="False"
                                            Visibility="Collapsed"/>
