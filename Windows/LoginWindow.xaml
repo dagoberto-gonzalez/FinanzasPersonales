@@ -45,6 +45,14 @@
                            HorizontalAlignment="Center"
                            Margin="0,0,0,32"/>
 
+                <!-- Instalación nueva: ya no se crea sola una cuenta "Admin" con contraseña
+                     conocida, así que hay que decir por dónde se empieza. -->
+                <Border Background="#7C3AED22" CornerRadius="8" Padding="12,10" Margin="0,-16,0,20"
+                        Visibility="{Binding SinCuentasVisibility}">
+                    <TextBlock Text="Aún no hay cuentas. Pulsa «Crear cuenta nueva»: la primera será la administradora."
+                               FontSize="12" Foreground="#CDD6F4" TextWrapping="Wrap"/>
+                </Border>
+
                 <!-- Usuario -->
                 <TextBlock Text="Usuario"
                            Foreground="#6C7086"

@@ -85,7 +85,7 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 `CREATE TABLE IF NOT EXISTS` + ad-hoc column/table migrations on startup. Key tables:
 
 - `Configuracion (Clave, Valor)` — seeded with `moneda='₡'`, `max_usuarios`, `presupuesto_mensual`
-- `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion)` — Rol: "Admin"|"Normal"
+- `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion)` — Rol: "Admin"|"Normal". See "Accounts and passwords" below
 - `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId, PagoDeTarjetaId)` — the last two are the D2 axes
 - `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite)`
 - `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial)` — UNIQUE(UsuarioId, Nombre). There is **no stored current balance**: see "Derived balances" below
@@ -206,6 +206,21 @@ These are enforced in `AppDatabase` (not just in the UI), so breaking them fails
   (it would be `1.200,00` or `1,200.00`), and silently picking a reading is how a wrong figure
   ends up recorded. A number may not use the same character for grouping and for decimals, and
   thousands groups must be three digits.
+
+## Accounts and passwords
+
+- **There is no factory admin account.** A fresh install has zero users; the first person to
+  register becomes `Admin` (`RegistroViewModel`), and the login window says so. Previously
+  `MigrarAMultiUsuario` created `Admin`/`admin123` in *any* empty database, so whoever opened a
+  new install first was admin. It now only creates a user when migrating a mono-user database
+  (credentials from `Configuracion`, or existing data).
+- **Passwords go through `Services.Contrasenas`**, never a bare hash: PBKDF2-HMAC-SHA256, random
+  per-user salt, 600,000 iterations (~60 ms on .NET 10), stored as
+  `pbkdf2-sha256$iterations$salt$hash`. The old unsalted SHA-256 hex is accepted only to migrate
+  it: `ValidarCredenciales` re-saves it in the new format on the next successful login, so no one
+  has to recreate their account. Raising `Iteraciones` later upgrades accounts the same way.
+- Tests lower `Contrasenas.Iteraciones` (internal, `InternalsVisibleTo`) in `BaseDePrueba`'s
+  static constructor; every test creates a user and the real cost would add a minute.
 
 ## Control Laboral: calculated vs paid
 

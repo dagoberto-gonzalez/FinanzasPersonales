@@ -1,8 +1,7 @@
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Data.Sqlite;
 using FinanzasPersonales.Models;
+using FinanzasPersonales.Services;
 
 namespace FinanzasPersonales.Data;
 
@@ -60,11 +59,7 @@ public class AppDatabase
         return c;
     }
 
-    public static string Hash(string text)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(text));
-        return Convert.ToHexString(bytes);
-    }
+    // Hash() (SHA-256 sin sal) se eliminó: las contraseñas van por Services.Contrasenas.
 
     private static HashSet<string> GetColumnas(SqliteConnection conn, string tabla)
     {
@@ -498,23 +493,44 @@ public class AppDatabase
         }
     }
 
-    /// <summary>Migra de sistema mono-usuario a multi-usuario: crea el primer Admin desde Configuracion.</summary>
+    /// <summary>
+    /// Migra de sistema mono-usuario a multi-usuario: crea el primer Admin desde Configuracion.
+    /// <para>
+    /// Sólo si hay algo que migrar. Antes lo hacía en CUALQUIER base sin usuarios, incluida una
+    /// instalación nueva, con la contraseña <c>admin123</c> escrita en el código: quien abriera
+    /// primero la app entraba como administrador. Y la regla de que el primer registrado es el
+    /// administrador (RegistroViewModel) no llegaba a aplicarse nunca.
+    /// </para>
+    /// </summary>
     private static void MigrarAMultiUsuario(SqliteConnection conn)
     {
         var hayUsuarios = EjecutarScalar<long>(conn, "SELECT COUNT(*) FROM Usuarios");
         if (hayUsuarios > 0) return;
 
         // Leer credenciales del sistema antiguo
-        using var cmdCfg = conn.CreateCommand();
-        cmdCfg.CommandText = "SELECT Clave, Valor FROM Configuracion WHERE Clave IN ('usuario','password_hash')";
-        string usuario = "Admin", passwordHash = Hash("admin123");
-        using var r = cmdCfg.ExecuteReader();
-        while (r.Read())
+        string? usuario = null, passwordHash = null;
+        using (var cmdCfg = conn.CreateCommand())
         {
-            if (r.GetString(0) == "usuario")       usuario      = r.GetString(1);
-            if (r.GetString(0) == "password_hash") passwordHash = r.GetString(1);
+            cmdCfg.CommandText = "SELECT Clave, Valor FROM Configuracion WHERE Clave IN ('usuario','password_hash')";
+            using var r = cmdCfg.ExecuteReader();
+            while (r.Read())
+            {
+                if (r.GetString(0) == "usuario")       usuario      = r.GetString(1);
+                if (r.GetString(0) == "password_hash") passwordHash = r.GetString(1);
+            }
         }
-        r.Close();
+
+        bool hayDatosViejos = EjecutarScalar<long>(conn,
+            "SELECT (SELECT COUNT(*) FROM Transacciones) + (SELECT COUNT(*) FROM MetasAhorro)") > 0;
+
+        // Instalación nueva: no se crea nadie. El primero en registrarse será el administrador.
+        if (passwordHash is null && !hayDatosViejos) return;
+
+        // Datos de la versión mono-usuario sin credenciales guardadas: entraban con las de
+        // fábrica, así que son las únicas que su dueño conoce. El hash viejo (SHA-256 sin sal)
+        // se acepta una vez y se reemplaza en el primer inicio de sesión.
+        usuario      ??= "Admin";
+        passwordHash ??= Contrasenas.Crear("admin123");
 
         // Insertar usuario administrador
         EjecutarNonQuery(conn,
@@ -893,26 +909,40 @@ public class AppDatabase
     }
     // ── Usuarios ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Comprueba usuario y contraseña. Con sal ya no se puede buscar por hash en el WHERE: se
+    /// lee la fila del usuario y se verifica aparte. Si coincide pero estaba guardada en el
+    /// formato viejo (SHA-256 sin sal), se vuelve a guardar con el actual: las cuentas existentes
+    /// se migran solas al iniciar sesión.
+    /// </summary>
     public Usuario? ValidarCredenciales(string nombreUsuario, string password)
     {
-        using var conn = Abrir();
-        using var cmd  = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT Id, NombreUsuario, Rol, Activo
-            FROM Usuarios
-            WHERE NombreUsuario=$u AND PasswordHash=$h
-            """;
-        cmd.Parameters.AddWithValue("$u", nombreUsuario.Trim());
-        cmd.Parameters.AddWithValue("$h", Hash(password));
-        using var r = cmd.ExecuteReader();
-        if (!r.Read()) return null;
-        return new Usuario
+        Usuario? usuario = null;
+        string   guardado;
+        using (var conn = Abrir())
+        using (var cmd  = conn.CreateCommand())
         {
-            Id            = r.GetInt32(0),
-            NombreUsuario = r.GetString(1),
-            Rol           = r.GetString(2),
-            Activo        = r.GetInt32(3) == 1
-        };
+            cmd.CommandText = """
+                SELECT Id, NombreUsuario, Rol, Activo, PasswordHash
+                FROM Usuarios
+                WHERE NombreUsuario=$u
+                """;
+            cmd.Parameters.AddWithValue("$u", nombreUsuario.Trim());
+            using var r = cmd.ExecuteReader();
+            if (!r.Read()) return null;
+            usuario = new Usuario
+            {
+                Id            = r.GetInt32(0),
+                NombreUsuario = r.GetString(1),
+                Rol           = r.GetString(2),
+                Activo        = r.GetInt32(3) == 1
+            };
+            guardado = r.GetString(4);
+        }
+
+        if (!Contrasenas.Verificar(password, guardado, out var actualizar)) return null;
+        if (actualizar) CambiarPassword(usuario.Id, password);
+        return usuario;
     }
 
     public bool ExisteUsuario(string nombreUsuario)
@@ -941,7 +971,7 @@ public class AppDatabase
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             "INSERT INTO Usuarios (NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion) VALUES ($u,$h,$r,1,date('now'))",
-            ("$u", nombreUsuario.Trim()), ("$h", Hash(password)), ("$r", rol));
+            ("$u", nombreUsuario.Trim()), ("$h", Contrasenas.Crear(password)), ("$r", rol));
 
         long id = EjecutarScalar<long>(conn, "SELECT last_insert_rowid()");
 
@@ -1021,19 +1051,12 @@ public class AppDatabase
         using var conn = Abrir();
         EjecutarNonQuery(conn,
             "UPDATE Usuarios SET PasswordHash=$h WHERE Id=$id",
-            ("$h", Hash(nuevaPassword)), ("$id", usuarioId));
+            ("$h", Contrasenas.Crear(nuevaPassword)), ("$id", usuarioId));
     }
 
-    // ── Autenticación (legado – compatibilidad interna) ────────────────────────
-
-    public bool ValidarCredencialesLegado(string usuario, string password)
-    {
-        using var conn = Abrir();
-        var usuarioDb = EjecutarScalar<string>(conn, "SELECT Valor FROM Configuracion WHERE Clave='usuario'");
-        var hashDb    = EjecutarScalar<string>(conn, "SELECT Valor FROM Configuracion WHERE Clave='password_hash'");
-        return string.Equals(usuario, usuarioDb, StringComparison.OrdinalIgnoreCase)
-            && hashDb == Hash(password);
-    }
+    // ValidarCredencialesLegado() se eliminó: nadie la llamaba, y comprobaba contra las
+    // credenciales de Configuracion de la versión mono-usuario, que MigrarAMultiUsuario ya
+    // copia a la tabla Usuarios.
 
     // ── Configuración ─────────────────────────────────────────────────────────
 

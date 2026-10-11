@@ -1,5 +1,6 @@
 using System.IO;
 using FinanzasPersonales.Data;
+using FinanzasPersonales.Services;
 using Microsoft.Data.Sqlite;
 
 namespace FinanzasPersonales.Tests;
@@ -17,6 +18,10 @@ public sealed class BaseDePrueba : IDisposable
 
     /// <summary>Usuario creado por defecto en cada base de prueba.</summary>
     public int UsuarioId { get; }
+
+    // Cada prueba crea un usuario: con las 600.000 iteraciones reales de PBKDF2 la suite tardaría
+    // un minuto más. El coste no cambia lo que se prueba (formato, sal, verificación).
+    static BaseDePrueba() => Contrasenas.Iteraciones = 1_000;
 
     public BaseDePrueba()
     {
