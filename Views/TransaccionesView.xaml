@@ -20,6 +20,23 @@
         <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,12">
             <StackPanel>
 
+                <!-- Modo edición: el mismo formulario, rellenado con la transacción elegida. -->
+                <Border Background="#7C3AED22" CornerRadius="6" Padding="12,6" Margin="0,0,0,10"
+                        Visibility="{Binding EditandoVisibility}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding TituloEdicion}" FontSize="12" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        <Button Grid.Column="1" Content="Cancelar"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding CancelarEdicionCommand}"
+                                Padding="12,4"/>
+                    </Grid>
+                </Border>
+
                 <!-- Fila 1: tipo + monto + categoría + fecha + guardar -->
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
@@ -71,7 +88,7 @@
 
                     <!-- Guardar -->
                     <Button Grid.Column="12"
-                            Content="Guardar"
+                            Content="{Binding TextoGuardar}"
                             Style="{StaticResource PrimaryButton}"
                             Command="{Binding GuardarCommand}"
                             Padding="22,11"/>
@@ -264,15 +281,25 @@
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
 
-                    <DataGridTemplateColumn Width="85">
+                    <DataGridTemplateColumn Width="110">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <Button Content="✕"
-                                        Style="{StaticResource DangerButton}"
-                                        Padding="10,4"
-                                        Command="{Binding DataContext.EliminarCommand,
-                                            RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                        CommandParameter="{Binding}"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="✎"
+                                            ToolTip="Editar"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Padding="10,4" Margin="0,0,6,0"
+                                            Command="{Binding DataContext.EditarCommand,
+                                                RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"/>
+                                    <Button Content="✕"
+                                            ToolTip="Eliminar"
+                                            Style="{StaticResource DangerButton}"
+                                            Padding="10,4"
+                                            Command="{Binding DataContext.EliminarCommand,
+                                                RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"/>
+                                </StackPanel>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>

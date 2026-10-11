@@ -1,5 +1,5 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
+using FinanzasPersonales.Services;
 using System.Windows;
 using System.Windows.Input;
 using FinanzasPersonales.Data;
@@ -154,6 +154,26 @@ public class TransaccionesViewModel : BaseViewModel
     public Visibility MensajeErrorVisibility =>
         string.IsNullOrEmpty(_error) ? Visibility.Collapsed : Visibility.Visible;
 
+    // ── Edición ───────────────────────────────────────────────────────────────
+    // Antes una transacción equivocada sólo se podía borrar y volver a crear. El formulario de
+    // alta sirve para editar: se rellena con la transacción y Guardar la actualiza.
+    private Transaccion? _editando;
+
+    public bool       EstaEditando        => _editando is not null;
+    public Visibility EditandoVisibility  => EstaEditando ? Visibility.Visible : Visibility.Collapsed;
+    public string     TextoGuardar        => EstaEditando ? "Guardar cambios" : "Guardar";
+    public string     TituloEdicion       => _editando is null
+        ? ""
+        : $"Editando: {_editando.EtiquetaDisplay} · {_editando.Fecha:dd/MM/yyyy}";
+
+    private void NotificarEdicion()
+    {
+        OnPropertyChanged(nameof(EstaEditando));
+        OnPropertyChanged(nameof(EditandoVisibility));
+        OnPropertyChanged(nameof(TextoGuardar));
+        OnPropertyChanged(nameof(TituloEdicion));
+    }
+
     // ── Búsqueda ──────────────────────────────────────────────────────────────
     private string _busqueda = string.Empty;
     public string BusquedaTexto
@@ -196,6 +216,8 @@ public class TransaccionesViewModel : BaseViewModel
     // ── Comandos ──────────────────────────────────────────────────────────────
     public ICommand GuardarCommand  { get; }
     public ICommand EliminarCommand { get; }
+    public ICommand EditarCommand   { get; }
+    public ICommand CancelarEdicionCommand { get; }
     public ICommand FiltrarCommand  { get; }
     public ICommand LimpiarCommand  { get; }
 
@@ -207,6 +229,8 @@ public class TransaccionesViewModel : BaseViewModel
         _uid            = usuarioId;
         GuardarCommand  = new RelayCommand(Guardar);
         EliminarCommand = new RelayCommand<Transaccion>(Eliminar);
+        EditarCommand   = new RelayCommand<Transaccion>(Editar);
+        CancelarEdicionCommand = new RelayCommand(LimpiarFormulario);
         FiltrarCommand  = new RelayCommand(CargarTransacciones);
         LimpiarCommand  = new RelayCommand(LimpiarFiltros);
         CargarCategorias();
@@ -287,9 +311,9 @@ public class TransaccionesViewModel : BaseViewModel
     {
         MensajeError = string.Empty;
 
-        if (!decimal.TryParse(_monto.Replace(",", "."),
-                NumberStyles.Any, CultureInfo.InvariantCulture, out var montoDecimal)
-            || montoDecimal <= 0)
+        // Dinero y no decimal.TryParse: al editar, el monto llega como "15.000", que el parseo
+        // anterior leía como 15. Y quien escribe "1.500,50" o "1500.50" quiere decir lo mismo.
+        if (!Dinero.TryParsePositivo(_monto, out var montoDecimal))
         {
             MensajeError = "Ingresa un monto válido mayor a 0.";
             return;
@@ -326,8 +350,9 @@ public class TransaccionesViewModel : BaseViewModel
             }
         }
 
-        _db.InsertarTransaccion(new Transaccion
+        var t = new Transaccion
         {
+            Id               = _editando?.Id ?? 0,
             Tipo             = _esIngreso ? "Ingreso" : "Gasto",
             Monto            = montoDecimal,
             Categoria        = _categoria,
@@ -337,15 +362,92 @@ public class TransaccionesViewModel : BaseViewModel
             CuentaNombre     = cuenta,
             TarjetaCreditoId = tarjetaId,
             CuentaId         = cuentaId
-        }, _uid);
+        };
 
-        Monto       = string.Empty;
-        Descripcion = string.Empty;
-        Notas       = string.Empty;
-        Fecha       = DateTime.Today;
-        MetodoPago  = "Efectivo";
+        try
+        {
+            if (_editando is null) _db.InsertarTransaccion(t, _uid);
+            else                   _db.ActualizarTransaccion(t, _uid);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            // Las reglas viven en AppDatabase; aquí sólo se muestran.
+            MensajeError = ex.Message;
+            return;
+        }
 
+        LimpiarFormulario();
         CargarTransacciones();
+    }
+
+    /// <summary>Vuelve el formulario a "nueva transacción", vacío.</summary>
+    private void LimpiarFormulario()
+    {
+        _editando    = null;
+        NotificarEdicion();
+        MensajeError = string.Empty;
+        Monto        = string.Empty;
+        Descripcion  = string.Empty;
+        Notas        = string.Empty;
+        Fecha        = DateTime.Today;
+        EsIngreso    = false;
+        MetodoPago   = "Efectivo";
+    }
+
+    /// <summary>
+    /// Carga una transacción en el formulario para editarla. El orden importa: primero el tipo
+    /// (decide si "Tarjeta" está en la lista de métodos), luego el método (llena la lista de
+    /// cuentas o tarjetas) y por último la cuenta o tarjeta concreta.
+    /// </summary>
+    private void Editar(Transaccion? t)
+    {
+        if (t is null) return;
+
+        if (_db.MotivoNoEditable(t.Id) is { } motivo)
+        {
+            MessageBox.Show(motivo, "No se edita aquí", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        EsIngreso = t.Tipo == "Ingreso";
+
+        // No se guarda si fue SINPE o transferencia, sólo la cuenta: para el saldo da igual.
+        string? subItem = null;
+        if (t.TarjetaCreditoId is { } tarjetaId)
+        {
+            MetodoPago = MetodoTarjeta;
+            subItem    = _db.ObtenerTarjetas(_uid).FirstOrDefault(x => x.Id == tarjetaId)?.Nombre;
+        }
+        else if (t.CuentaId is { } cuentaId)
+        {
+            MetodoPago = "Transferencia";
+            subItem    = _db.ObtenerCuentas(_uid).FirstOrDefault(x => x.Id == cuentaId)?.Nombre;
+        }
+        else
+        {
+            MetodoPago = "Efectivo";
+        }
+
+        if (subItem is not null)
+        {
+            // Una cuenta desactivada no está en la lista, pero la transacción sigue siendo suya.
+            if (!SubItems.Any(i => !i.EsEncabezado && i.Nombre == subItem))
+                SubItems.Add(new SubItem(subItem));
+            SelectedSubItem = SubItems.First(i => !i.EsEncabezado && i.Nombre == subItem);
+        }
+
+        // Una categoría borrada después de usarse tampoco está en la lista.
+        if (!CategoriasForm.Contains(t.Categoria)) CategoriasForm.Add(t.Categoria);
+        Categoria   = t.Categoria;
+
+        Monto       = t.Monto % 1 == 0 ? t.Monto.ToString("N0") : t.Monto.ToString("N2");
+        Descripcion = t.Descripcion;
+        Notas       = t.Notas;
+        Fecha       = t.Fecha;
+
+        MensajeError = string.Empty;
+        _editando    = t;
+        NotificarEdicion();
     }
 
     private void Eliminar(Transaccion? t)
@@ -358,6 +460,8 @@ public class TransaccionesViewModel : BaseViewModel
             System.Windows.MessageBoxImage.Warning);
         if (res != System.Windows.MessageBoxResult.Yes) return;
         _db.EliminarTransaccion(t.Id);
+        // Si era la que se estaba editando, el formulario ya no tiene qué guardar.
+        if (_editando?.Id == t.Id) LimpiarFormulario();
         CargarTransacciones();
     }
 
