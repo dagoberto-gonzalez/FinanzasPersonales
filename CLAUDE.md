@@ -161,6 +161,11 @@ Marking a `GastoFijo`/`IngresoFijo` paid in `PagosMensuales` still creates a lin
 `Transaccion` (`TransaccionId`); unmarking deletes it, and every balance follows on its own.
 `EliminarTransaccion` is now a plain `DELETE` — there is nothing left to revert.
 
+**Deleting a fixed item keeps its past payments.** `EliminarGastoFijo` / `EliminarIngresoFijo`
+drop the item and its `PagosMensuales` rows but leave the transactions: deleting means "no longer
+expected", not "never paid". They used to delete every past payment's transaction too, erasing
+real money from history, reports and balances.
+
 ### Foreign keys
 
 The schema declares its foreign keys and `Abrir()` turns enforcement on for every connection —

@@ -136,7 +136,11 @@ public class Bloque2D1Tests
         var gastoId = (int)t.Escalar<long>("SELECT Id FROM GastosFijos LIMIT 1");
         t.Db.EliminarGastoFijo(gastoId);
 
-        Assert.Equal(100000m, Leer(t, id).SaldoActual);
+        // El saldo sigue cuadrando con las transacciones, que es lo que esta prueba vigila.
+        // Lo que cambió es que el pago ya NO se borra con el gasto: se pagó de verdad. Antes
+        // esta línea esperaba 100.000, es decir, que borrar el gasto deshiciera el pago.
+        Assert.Equal(75000m, Leer(t, id).SaldoActual);
+        Assert.Single(t.Db.ObtenerTransacciones(t.UsuarioId));
         Assert.Empty(t.Db.VerificarIntegridad());
     }
 

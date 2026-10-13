@@ -1815,36 +1815,38 @@ public class AppDatabase
         }
     }
 
-    public void EliminarGastoFijo(int id)
+    /// <summary>
+    /// Borra un gasto fijo: deja de esperarse su pago. Lo que ya se pagó se queda.
+    /// <para>
+    /// Antes borraba también las transacciones de todos sus pagos anteriores: borrar "Internet"
+    /// hacía desaparecer años de pagos de internet del historial, de los reportes y de los saldos
+    /// de las cuentas, como si nunca se hubieran hecho. Venía de cuando había saldos guardados que
+    /// "revertir"; con los saldos derivados (D1) sólo quedaba el borrado del dinero real.
+    /// </para>
+    /// <para>
+    /// Sus pagos quedan como transacciones normales —categoría «Gastos Fijos», con su nombre de
+    /// descripción— y desde entonces se editan en Transacciones como cualquier otra.
+    /// </para>
+    /// </summary>
+    public void EliminarGastoFijo(int id) => EliminarFijo("Gasto", "GastosFijos", id);
+
+    /// <summary>
+    /// Común a gastos e ingresos fijos. Los registros de <c>PagosMensuales</c> sí se van: sólo
+    /// dicen "este mes está pagado" de un fijo que ya no existe. La transacción a la que
+    /// apuntaban no se toca.
+    /// </summary>
+    private void EliminarFijo(string tipo, string tabla, int id)
     {
         using var conn = Abrir();
-
-        // Revertir saldos y borrar transacciones generadas por pagos marcados
-        using (var cmd = conn.CreateCommand())
+        using var tr   = conn.BeginTransaction();
+        try
         {
-            cmd.CommandText = """
-                SELECT p.TransaccionId, t.Monto, t.CuentaId, t.TarjetaCreditoId
-                FROM PagosMensuales p
-                LEFT JOIN Transacciones t ON t.Id = p.TransaccionId
-                WHERE p.FijoId = $id AND p.TipoFijo = 'Gasto'
-                  AND p.Pagado = 1 AND p.TransaccionId IS NOT NULL
-                """;
-            cmd.Parameters.AddWithValue("$id", id);
-            var pagos = new List<(long TransId, double Monto, int? CuentaId, int? TarjetaId)>();
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                pagos.Add((r.GetInt64(0), r.GetDouble(1),
-                           r.IsDBNull(2) ? null : r.GetInt32(2),
-                           r.IsDBNull(3) ? null : r.GetInt32(3)));
-
-            foreach (var (transId, monto, cuentaId, tarjetaId) in pagos)
-            {
-                EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$tid", ("$tid", transId));
-            }
+            EjecutarNonQuery(conn, "DELETE FROM PagosMensuales WHERE TipoFijo=$t AND FijoId=$id",
+                ("$t", tipo), ("$id", id));
+            EjecutarNonQuery(conn, $"DELETE FROM {tabla} WHERE Id=$id", ("$id", id));
+            tr.Commit();
         }
-
-        EjecutarNonQuery(conn, "DELETE FROM PagosMensuales WHERE TipoFijo='Gasto' AND FijoId=$id", ("$id", id));
-        EjecutarNonQuery(conn, "DELETE FROM GastosFijos WHERE Id=$id", ("$id", id));
+        catch { tr.Rollback(); throw; }
     }
 
     public void MarcarGastoFijoPagado(int pagoMensualId, bool pagado, string metodoPago,
@@ -2049,35 +2051,11 @@ public class AppDatabase
         catch { tr.Rollback(); throw; }
     }
 
-    public void EliminarIngresoFijo(int id)
-    {
-        using var conn = Abrir();
-
-        // Revertir saldo por pagos recibidos y borrar sus transacciones
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = """
-                SELECT p.TransaccionId, i.Monto, i.CuentaId
-                FROM PagosMensuales p
-                JOIN IngresosFijos i ON i.Id = p.FijoId
-                WHERE p.FijoId=$id AND p.TipoFijo='Ingreso' AND p.Pagado=1
-                  AND p.TransaccionId IS NOT NULL
-                """;
-            cmd.Parameters.AddWithValue("$id", id);
-            var pagos = new List<(long TransId, double Monto, int? CuentaId)>();
-            using var r = cmd.ExecuteReader();
-            while (r.Read())
-                pagos.Add((r.GetInt64(0), r.GetDouble(1), r.IsDBNull(2) ? null : r.GetInt32(2)));
-
-            foreach (var (transId, monto, cuentaId) in pagos)
-            {
-                EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$tid", ("$tid", transId));
-            }
-        }
-
-        EjecutarNonQuery(conn, "DELETE FROM PagosMensuales WHERE TipoFijo='Ingreso' AND FijoId=$id", ("$id", id));
-        EjecutarNonQuery(conn, "DELETE FROM IngresosFijos WHERE Id=$id", ("$id", id));
-    }
+    /// <summary>
+    /// Borra un ingreso fijo; lo ya recibido se queda como transacción normal. Ver
+    /// <see cref="EliminarGastoFijo"/>: antes se llevaba por delante todos sus cobros pasados.
+    /// </summary>
+    public void EliminarIngresoFijo(int id) => EliminarFijo("Ingreso", "IngresosFijos", id);
 
     public void MarcarIngresoFijoRecibido(int pagoMensualId, bool recibido, int usuarioId)
     {
