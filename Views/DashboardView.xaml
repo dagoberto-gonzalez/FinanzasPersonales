@@ -171,6 +171,78 @@
                 </Border>
             </Grid>
 
+            <!-- Presupuesto del mes: de cada usuario y editable aquí. Antes era un ₡500.000
+                 global y fijo, y sólo aparecía como aviso al pasarse. -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,24">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="PRESUPUESTO DEL MES"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="✎" ToolTip="Cambiar presupuesto"
+                                Style="{StaticResource SecondaryButton}" Padding="8,2"
+                                Command="{Binding EditarPresupuestoCommand}"
+                                Visibility="{Binding ConPresupuestoVisibility}"/>
+                    </Grid>
+
+                    <!-- Con presupuesto: cuánto llevas y cuánto queda -->
+                    <StackPanel Visibility="{Binding ConPresupuestoVisibility}">
+                        <TextBlock Text="{Binding PresupuestoUsoTexto}" FontSize="15" FontWeight="SemiBold"/>
+                        <Border CornerRadius="5" Height="10" Margin="0,10,0,8" ClipToBounds="True"
+                                Background="{StaticResource SurfaceBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{Binding BarraLlena}"/>
+                                    <ColumnDefinition Width="{Binding BarraVacia}"/>
+                                </Grid.ColumnDefinitions>
+                                <Border CornerRadius="5" Background="{Binding PresupuestoColor}"/>
+                            </Grid>
+                        </Border>
+                        <TextBlock Text="{Binding PresupuestoRestanteTexto}" FontSize="12"
+                                   Foreground="{Binding PresupuestoColor}"/>
+                    </StackPanel>
+
+                    <!-- Sin presupuesto -->
+                    <Grid Visibility="{Binding SinPresupuestoVisibility}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="No tienes presupuesto. Defínelo para ver cuánto te queda cada mes."
+                                   Foreground="{StaticResource TextMutedBrush}" FontSize="13"
+                                   TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="Definir presupuesto"
+                                Style="{StaticResource PrimaryButton}" Padding="14,6" Margin="12,0,0,0"
+                                Command="{Binding EditarPresupuestoCommand}"/>
+                    </Grid>
+
+                    <!-- Editando -->
+                    <StackPanel Visibility="{Binding EdicionPresupuestoVisibility}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBox Width="180"
+                                     Text="{Binding PresupuestoEditado, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="₡ por mes"/>
+                            <Button Content="Guardar" Style="{StaticResource PrimaryButton}"
+                                    Padding="16,6" Margin="10,0,0,0"
+                                    Command="{Binding GuardarPresupuestoCommand}"/>
+                            <Button Content="Cancelar" Style="{StaticResource SecondaryButton}"
+                                    Padding="14,6" Margin="8,0,0,0"
+                                    Command="{Binding CancelarPresupuestoCommand}"/>
+                        </StackPanel>
+                        <TextBlock Text="Vacío o 0 = sin presupuesto. Cuenta los gastos del mes, incluidas las compras con tarjeta."
+                                   Foreground="{StaticResource TextMutedBrush}" FontSize="11"
+                                   TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        <TextBlock Text="{Binding PresupuestoError}" Foreground="{StaticResource RedBrush}"
+                                   FontSize="12" Margin="0,6,0,0"
+                                   Visibility="{Binding PresupuestoErrorVisibility}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <!-- Segunda fila: gráfica + recientes -->
             <Grid>
                 <Grid.ColumnDefinitions>
