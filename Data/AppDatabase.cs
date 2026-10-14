@@ -196,6 +196,7 @@ public class AppDatabase
         // Después de las claves foráneas: aquella migración recrea las tablas con una lista fija
         // de columnas y perdería las que se añaden aquí.
         MigrarComprobantesDePago(conn);
+        MigrarTipoDeCategoria(conn);
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -565,8 +566,54 @@ public class AppDatabase
                    .Concat(CategoriasSistema);
         foreach (var c in cats)
             EjecutarNonQuery(conn,
-                "INSERT INTO Categorias (UsuarioId, Nombre) SELECT NULL,$n WHERE NOT EXISTS (SELECT 1 FROM Categorias WHERE UsuarioId IS NULL AND Nombre=$n)",
-                ("$n", c));
+                "INSERT INTO Categorias (UsuarioId, Nombre, Tipo) SELECT NULL,$n,$t WHERE NOT EXISTS (SELECT 1 FROM Categorias WHERE UsuarioId IS NULL AND Nombre=$n)",
+                ("$n", c), ("$t", TipoDeFabrica(c)));
+    }
+
+    /// <summary>Tipo de las categorías que trae la aplicación.</summary>
+    private static string TipoDeFabrica(string nombre) => nombre switch
+    {
+        "Salario" or "Ingresos Fijos" => Categoria.TipoIngreso,
+        "Otros"                       => Categoria.TipoAmbos,
+        _                             => Categoria.TipoGasto
+    };
+
+    /// <summary>
+    /// Añade el tipo (Gasto / Ingreso / Ambos) a las categorías. Va después de las claves
+    /// foráneas: aquella migración recrea Categorias con una lista fija de columnas.
+    /// <para>
+    /// Las existentes se clasifican así: las de fábrica, por su nombre; las demás, por cómo se
+    /// han usado —sólo en ingresos, Ingreso; en los dos, Ambos—. Una propia que nunca se usó
+    /// queda en Ambos para que no desaparezca de ninguna lista: su dueño la ajusta en Categorías.
+    /// </para>
+    /// </summary>
+    private static void MigrarTipoDeCategoria(SqliteConnection conn)
+    {
+        if (GetColumnas(conn, "Categorias").Contains("Tipo")) return;
+
+        AddColumna(conn, "Categorias", "Tipo", "TEXT NOT NULL DEFAULT 'Gasto'");
+
+        const string Usada = """
+            EXISTS (SELECT 1 FROM Transacciones t
+                    WHERE t.Categoria = Categorias.Nombre AND t.Tipo = '{0}'
+                      AND (Categorias.UsuarioId IS NULL OR t.UsuarioId = Categorias.UsuarioId))
+            """;
+        string enIngresos = string.Format(Usada, "Ingreso"), enGastos = string.Format(Usada, "Gasto");
+
+        EjecutarNonQuery(conn, $"""
+            UPDATE Categorias SET Tipo = CASE
+                WHEN {enIngresos} AND {enGastos} THEN 'Ambos'
+                WHEN {enIngresos}               THEN 'Ingreso'
+                WHEN {enGastos}                 THEN 'Gasto'
+                WHEN UsuarioId IS NOT NULL      THEN 'Ambos'
+                ELSE 'Gasto' END
+            """);
+
+        // Las de fábrica tienen su tipo, se hayan usado como se hayan usado.
+        foreach (var nombre in new[] { "Salario", "Ingresos Fijos", "Gastos Fijos", "Tarjeta" })
+            EjecutarNonQuery(conn, "UPDATE Categorias SET Tipo=$t WHERE UsuarioId IS NULL AND Nombre=$n",
+                ("$t", TipoDeFabrica(nombre)), ("$n", nombre));
+        EjecutarNonQuery(conn, "UPDATE Categorias SET Tipo='Ambos' WHERE UsuarioId IS NULL AND Nombre='Otros'");
     }
 
 
@@ -1092,22 +1139,15 @@ public class AppDatabase
     public static bool EsCategoriaSistema(string nombre) =>
         CategoriasSistema.Contains(nombre, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Devuelve nombres de categorías visibles para el usuario: globales + propias.</summary>
-    public List<string> ObtenerCategorias(int usuarioId)
-    {
-        using var conn = Abrir();
-        using var cmd  = conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT Nombre FROM Categorias
-            WHERE UsuarioId IS NULL OR UsuarioId = $uid
-            ORDER BY CASE WHEN UsuarioId IS NULL THEN 0 ELSE 1 END, Nombre
-            """;
-        cmd.Parameters.AddWithValue("$uid", usuarioId);
-        var list = new List<string>();
-        using var r = cmd.ExecuteReader();
-        while (r.Read()) list.Add(r.GetString(0));
-        return list;
-    }
+    /// <summary>
+    /// Nombres de categorías visibles para el usuario: globales + propias. Con
+    /// <paramref name="tipoMovimiento"/> ("Gasto" o "Ingreso"), sólo las que sirven para él.
+    /// </summary>
+    public List<string> ObtenerCategorias(int usuarioId, string? tipoMovimiento = null) =>
+        ObtenerCategoriasDetalle(usuarioId)
+            .Where(c => tipoMovimiento is null || c.SirvePara(tipoMovimiento))
+            .Select(c => c.Nombre)
+            .ToList();
 
     /// <summary>Devuelve categorías con detalle (EsGlobal) para la pantalla de gestión.</summary>
     public List<Categoria> ObtenerCategoriasDetalle(int usuarioId)
@@ -1115,7 +1155,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT Id, Nombre, CASE WHEN UsuarioId IS NULL THEN 1 ELSE 0 END AS EsGlobal
+            SELECT Id, Nombre, CASE WHEN UsuarioId IS NULL THEN 1 ELSE 0 END AS EsGlobal, Tipo
             FROM Categorias
             WHERE UsuarioId IS NULL OR UsuarioId = $uid
             ORDER BY CASE WHEN UsuarioId IS NULL THEN 0 ELSE 1 END, Nombre
@@ -1124,18 +1164,54 @@ public class AppDatabase
         var list = new List<Categoria>();
         using var r = cmd.ExecuteReader();
         while (r.Read())
-            list.Add(new Categoria { Id = r.GetInt32(0), Nombre = r.GetString(1), EsGlobal = r.GetInt32(2) == 1 });
+            list.Add(new Categoria
+            {
+                Id = r.GetInt32(0), Nombre = r.GetString(1), EsGlobal = r.GetInt32(2) == 1, Tipo = r.GetString(3)
+            });
         return list;
     }
 
     /// <summary>Inserta categoría personal del usuario (o global si esGlobal=true, solo admin).</summary>
-    public void InsertarCategoria(string nombre, int usuarioId, bool esGlobal = false)
+    public void InsertarCategoria(string nombre, int usuarioId, bool esGlobal = false,
+                                  string tipo = Categoria.TipoGasto)
     {
+        ValidarTipoCategoria(tipo);
         using var conn = Abrir();
         object? uid = esGlobal ? (object?)null : usuarioId;
         EjecutarNonQuery(conn,
-            "INSERT OR IGNORE INTO Categorias (UsuarioId, Nombre) VALUES ($uid,$n)",
-            ("$uid", uid), ("$n", nombre.Trim()));
+            "INSERT OR IGNORE INTO Categorias (UsuarioId, Nombre, Tipo) VALUES ($uid,$n,$t)",
+            ("$uid", uid), ("$n", nombre.Trim()), ("$t", tipo));
+    }
+
+    private static void ValidarTipoCategoria(string tipo)
+    {
+        if (!Categoria.Tipos.Contains(tipo))
+            throw new ArgumentException($"Tipo de categoría desconocido: «{tipo}».", nameof(tipo));
+    }
+
+    /// <summary>
+    /// Cambia para qué movimientos se ofrece una categoría. Sólo afecta a qué se ofrece en el
+    /// formulario de Transacciones: lo ya registrado no cambia.
+    /// <para>
+    /// Las de sistema no se tocan: la aplicación las escribe sabiendo qué son. Una global, sólo
+    /// un administrador, como al renombrarla.
+    /// </para>
+    /// </summary>
+    public void CambiarTipoCategoria(int categoriaId, string tipo, int usuarioId, bool esAdmin)
+    {
+        ValidarTipoCategoria(tipo);
+        using var conn = Abrir();
+
+        var nombre = EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT Nombre FROM Categorias WHERE Id=$id),'')", ("$id", categoriaId));
+        if (EsCategoriaSistema(nombre)) return;
+
+        if (esAdmin)
+            EjecutarNonQuery(conn, "UPDATE Categorias SET Tipo=$t WHERE Id=$id",
+                ("$t", tipo), ("$id", categoriaId));
+        else
+            EjecutarNonQuery(conn, "UPDATE Categorias SET Tipo=$t WHERE Id=$id AND UsuarioId=$uid",
+                ("$t", tipo), ("$id", categoriaId), ("$uid", usuarioId));
     }
 
     /// <summary>Transacciones del usuario que usan esa categoría.</summary>

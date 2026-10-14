@@ -46,6 +46,7 @@ public class TransaccionesViewModel : BaseViewModel
             OnPropertyChanged(nameof(EsGasto));
             OnPropertyChanged(nameof(EsTarjeta));
             RefrescarMetodosPago();
+            SincronizarCategoriasForm();
         }
     }
 
@@ -59,6 +60,7 @@ public class TransaccionesViewModel : BaseViewModel
             OnPropertyChanged(nameof(EsIngreso));
             OnPropertyChanged(nameof(EsTarjeta));
             RefrescarMetodosPago();
+            SincronizarCategoriasForm();
         }
     }
 
@@ -102,7 +104,7 @@ public class TransaccionesViewModel : BaseViewModel
     public string Categoria
     {
         get => _categoria;
-        set { _categoria = value; OnPropertyChanged(); }
+        set { _categoria = value ?? string.Empty; OnPropertyChanged(); }
     }
     public string Descripcion
     {
@@ -287,24 +289,58 @@ public class TransaccionesViewModel : BaseViewModel
         SelectedSubItem = SubItems.FirstOrDefault(i => !i.EsEncabezado);
     }
 
+    // Todas las categorías del usuario, en el orden de la base. El formulario muestra las que
+    // sirven para el tipo elegido; el filtro, todas.
+    private List<Models.Categoria> _categorias = [];
+
     private void CargarCategorias()
     {
-        var cats = _db.ObtenerCategorias(_uid);
+        _categorias = _db.ObtenerCategoriasDetalle(_uid);
 
-        // «Tarjeta» queda fuera del formulario: marca los pagos de tarjeta, que se registran en
-        // la pantalla Tarjetas para que descuenten del saldo. Registrar uno a mano aquí lo
-        // contaría como un gasto nuevo además de la compra que ya se registró. Sí se mantiene
-        // en el filtro, para poder consultar los pagos hechos.
-        var paraFormulario = cats.Where(c => c != "Tarjeta").ToList();
-
-        CategoriasForm.Clear();
-        foreach (var c in paraFormulario) CategoriasForm.Add(c);
-        if (string.IsNullOrEmpty(_categoria) || !paraFormulario.Contains(_categoria))
-            Categoria = paraFormulario.FirstOrDefault() ?? string.Empty;
+        SincronizarCategoriasForm();
 
         CategoriasFiltro.Clear();
         CategoriasFiltro.Add("Todas");
-        foreach (var c in cats) CategoriasFiltro.Add(c);
+        foreach (var c in _categorias) CategoriasFiltro.Add(c.Nombre);
+    }
+
+    /// <summary>
+    /// Deja en el formulario sólo las categorías del tipo elegido (Gasto o Ingreso) y las que
+    /// sirven para ambos. Antes un ingreso ofrecía "Alimentación", "Transporte"…
+    /// <para>
+    /// «Tarjeta» nunca está: marca los pagos de tarjeta, que se registran en la pantalla
+    /// Tarjetas para que descuenten del saldo. Registrar uno aquí lo contaría como un gasto nuevo
+    /// además de la compra. Sí está en el filtro, para consultar los pagos hechos.
+    /// </para>
+    /// <para>
+    /// La lista se ajusta en el sitio y en este orden —añadir, mover la selección, quitar— para
+    /// no quitar NUNCA el elemento seleccionado. Es la misma trampa del método de pago: si el
+    /// ComboBox pierde su elemento seleccionado anula la selección y deja de leer el binding, y
+    /// el campo se queda en blanco aunque el ViewModel tenga un valor.
+    /// </para>
+    /// </summary>
+    private void SincronizarCategoriasForm()
+    {
+        var tipo     = _esIngreso ? Models.Categoria.TipoIngreso : Models.Categoria.TipoGasto;
+        var objetivo = _categorias
+            .Where(c => c.Nombre != "Tarjeta" && c.SirvePara(tipo))
+            .Select(c => c.Nombre)
+            .ToList();
+        var orden = _categorias.Select((c, i) => (c.Nombre, i))
+                               .GroupBy(x => x.Nombre).ToDictionary(g => g.Key, g => g.First().i);
+        int Pos(string n) => orden.TryGetValue(n, out var p) ? p : int.MaxValue;
+
+        // 1. Añadir las que faltan, cada una en su sitio.
+        foreach (var nombre in objetivo.Where(n => !CategoriasForm.Contains(n)))
+            CategoriasForm.Insert(CategoriasForm.Count(x => Pos(x) < Pos(nombre)), nombre);
+
+        // 2. Si la elegida no vale para este tipo, elegir otra que ya esté en la lista.
+        if (!objetivo.Contains(_categoria))
+            Categoria = objetivo.FirstOrDefault() ?? string.Empty;
+
+        // 3. Quitar las que sobran. La seleccionada ya no está entre ellas.
+        foreach (var sobra in CategoriasForm.Where(n => !objetivo.Contains(n)).ToList())
+            CategoriasForm.Remove(sobra);
     }
 
     private void Guardar()
@@ -316,6 +352,14 @@ public class TransaccionesViewModel : BaseViewModel
         if (!Dinero.TryParsePositivo(_monto, out var montoDecimal))
         {
             MensajeError = "Ingresa un monto válido mayor a 0.";
+            return;
+        }
+
+        // Puede quedar vacía si ninguna categoría sirve para este tipo de movimiento.
+        if (string.IsNullOrWhiteSpace(_categoria))
+        {
+            MensajeError = $"Elige una categoría. Si no hay ninguna de {(_esIngreso ? "ingresos" : "gastos")}, " +
+                           "créala en Categorías.";
             return;
         }
 
