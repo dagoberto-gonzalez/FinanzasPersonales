@@ -130,6 +130,9 @@
                         <TextBlock Text="Dinero real, sin contar lo comprado a crédito"
                                    Foreground="{StaticResource TextMutedBrush}"
                                    FontSize="12" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding DesgloseDisponibleTexto}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
 
                         <!-- D5: lo apartado en metas sigue siendo tuyo; se muestra, no se resta -->
                         <StackPanel Orientation="Horizontal" Margin="0,10,0,0"
