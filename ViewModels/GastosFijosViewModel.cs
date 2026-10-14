@@ -268,7 +268,9 @@ public class GastosFijosViewModel : BaseViewModel
     {
         if (vm is null) return;
         var res = System.Windows.MessageBox.Show(
-            $"¿Eliminar el gasto fijo \"{vm.Nombre}\"?",
+            $"¿Eliminar el gasto fijo \"{vm.Nombre}\"?\n\n" +
+            "Dejará de aparecer como pendiente. Los pagos que ya registraste se conservan en " +
+            "Transacciones.",
             "Confirmar eliminación",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning);

@@ -246,7 +246,8 @@ public class IngresosFijosViewModel : BaseViewModel
     {
         if (i is null) return;
         var res = System.Windows.MessageBox.Show(
-            $"¿Eliminar el ingreso fijo \"{i.Nombre}\"?",
+            $"¿Eliminar el ingreso fijo \"{i.Nombre}\"?\n\n" +
+            "Dejará de aparecer como pendiente. Lo que ya recibiste se conserva en Transacciones.",
             "Confirmar eliminación",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning);

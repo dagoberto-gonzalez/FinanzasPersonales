@@ -173,6 +173,51 @@ public class EditarFijosTests
         Assert.Equal(1000m, t.Db.ObtenerGastosFijosConEstado(Hoy.Year, Hoy.Month, otro).Single().Monto);
     }
 
+    // ── Borrar ──
+
+    /// <summary>
+    /// Borrar un fijo significa "ya no lo voy a pagar", no "nunca lo pagué". Antes se llevaba
+    /// todas las transacciones de sus meses anteriores: del historial, los reportes y los saldos.
+    /// </summary>
+    [Fact]
+    public void BorrarUnGastoFijoConservaSusPagosAnteriores()
+    {
+        using var t = new BaseDePrueba();
+        var cuenta = CrearCuenta(t, "Principal");
+        var antes  = Hoy.AddMonths(-1);
+        var id     = CrearGasto(t, 25_000, 10);
+        var fila   = Gastos(t, antes.Year, antes.Month).Single();
+        t.Db.MarcarGastoFijoPagado(fila.PagoMensualId, true, "Principal", t.UsuarioId, cuenta, null);
+
+        t.Db.EliminarGastoFijo(id);
+
+        var tx = t.Db.ObtenerTransacciones(t.UsuarioId).Single();
+        Assert.Equal(25_000m, tx.Monto);
+        Assert.Equal("Alquiler", tx.Descripcion);
+        Assert.Equal(-25_000m, t.Db.ObtenerCuentas(t.UsuarioId).Single().SaldoActual);
+        Assert.Empty(GastosHoy(t));
+        Assert.Equal(0, t.Escalar<long>("SELECT COUNT(*) FROM PagosMensuales"));
+        // Y como ya no la genera ningún fijo, se edita como cualquier otra.
+        Assert.Null(t.Db.MotivoNoEditable(tx.Id));
+        Assert.Empty(t.Db.VerificarIntegridad());
+    }
+
+    [Fact]
+    public void BorrarUnIngresoFijoConservaLoRecibido()
+    {
+        using var t = new BaseDePrueba();
+        var cuenta = CrearCuenta(t, "Nómina");
+        t.Db.InsertarIngresoFijo(new IngresoFijo { Nombre = "Sueldo", Monto = 600_000, DiaIngreso = 15, CuentaId = cuenta }, t.UsuarioId);
+        var fila = t.Db.ObtenerIngresosFijosConEstado(Hoy.Year, Hoy.Month, t.UsuarioId).Single();
+        t.Db.MarcarIngresoFijoRecibido(fila.PagoMensualId, true, t.UsuarioId);
+
+        t.Db.EliminarIngresoFijo(fila.Id);
+
+        Assert.Equal(600_000m, t.Db.ObtenerCuentas(t.UsuarioId).Single().SaldoActual);
+        Assert.Single(t.Db.ObtenerTransacciones(t.UsuarioId));
+        Assert.Empty(t.Db.VerificarIntegridad());
+    }
+
     // ── Ingresos fijos ──
 
     [Fact]
