@@ -198,6 +198,7 @@ public class AppDatabase
         MigrarComprobantesDePago(conn);
         MigrarTipoDeCategoria(conn);
         MigrarInicioDeFijos(conn);
+        MigrarPresupuestoPorUsuario(conn);
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -557,7 +558,8 @@ public class AppDatabase
     {
         // Valores por defecto de configuración global
         EjecutarNonQuery(conn,
-            "INSERT OR IGNORE INTO Configuracion VALUES ('moneda','₡'),('max_usuarios','20'),('presupuesto_mensual','500000')");
+            // El presupuesto ya no es global: va por usuario (ver MigrarPresupuestoPorUsuario).
+            "INSERT OR IGNORE INTO Configuracion VALUES ('moneda','₡'),('max_usuarios','20')");
 
         // Categorías globales por defecto
         // Nota: SQLite trata NULL != NULL en UNIQUE, así que INSERT OR IGNORE no evita duplicados
@@ -595,6 +597,44 @@ public class AppDatabase
                     date('now', 'localtime', 'start of month'))
                 """, ("$t", tipo));
         }
+    }
+
+    /// <summary>
+    /// El presupuesto mensual pasa de la configuración global a cada usuario.
+    /// <para>
+    /// Era una sola clave en <c>Configuracion</c>, compartida por todos los usuarios, que valía
+    /// ₡500.000 desde la instalación y no se podía cambiar desde ninguna pantalla. Los usuarios
+    /// que ya existían conservan ese valor (es el que su Dashboard venía usando); los nuevos
+    /// empiezan sin presupuesto. La clave global se borra para que nadie la vuelva a leer.
+    /// </para>
+    /// </summary>
+    private static void MigrarPresupuestoPorUsuario(SqliteConnection conn)
+    {
+        if (GetColumnas(conn, "Usuarios").Contains("PresupuestoMensual")) return;
+
+        AddColumna(conn, "Usuarios", "PresupuestoMensual", "REAL NOT NULL DEFAULT 0");
+        EjecutarNonQuery(conn, """
+            UPDATE Usuarios SET PresupuestoMensual = COALESCE(
+                (SELECT CAST(Valor AS REAL) FROM Configuracion WHERE Clave = 'presupuesto_mensual'), 0)
+            """);
+        EjecutarNonQuery(conn, "DELETE FROM Configuracion WHERE Clave = 'presupuesto_mensual'");
+    }
+
+    /// <summary>Presupuesto mensual del usuario. 0 = no tiene.</summary>
+    public decimal ObtenerPresupuesto(int usuarioId)
+    {
+        using var conn = Abrir();
+        return (decimal)EjecutarScalar<double>(conn,
+            "SELECT COALESCE((SELECT PresupuestoMensual FROM Usuarios WHERE Id=$id), 0)", ("$id", usuarioId));
+    }
+
+    /// <summary>Fija el presupuesto mensual del usuario. 0 lo quita (sin alertas).</summary>
+    public void GuardarPresupuesto(int usuarioId, decimal monto)
+    {
+        if (monto < 0) throw new ArgumentException("El presupuesto no puede ser negativo.", nameof(monto));
+        using var conn = Abrir();
+        EjecutarNonQuery(conn, "UPDATE Usuarios SET PresupuestoMensual=$m WHERE Id=$id",
+            ("$m", (double)monto), ("$id", usuarioId));
     }
 
     /// <summary>Día 1 del mes, como se guarda <c>FechaInicio</c>. <c>default</c> = el mes actual.</summary>

@@ -84,8 +84,8 @@ SQLite file lives in `%APPDATA%\FinanzasPersonales\finanzas.db`. `AppDatabase` o
 connection per operation (no connection pooling / EF Core) and runs idempotent
 `CREATE TABLE IF NOT EXISTS` + ad-hoc column/table migrations on startup. Key tables:
 
-- `Configuracion (Clave, Valor)` — seeded with `moneda='₡'`, `max_usuarios`, `presupuesto_mensual`
-- `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion)` — Rol: "Admin"|"Normal". See "Accounts and passwords" below
+- `Configuracion (Clave, Valor)` — seeded with `moneda='₡'`, `max_usuarios`. The monthly budget used to live here as one global key; it is now per user
+- `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion, PresupuestoMensual)` — Rol: "Admin"|"Normal". `PresupuestoMensual` (0 = none) drives the Dashboard budget card and alert, measured on the `AfectaPresupuesto` axis; edited on the card itself. See "Accounts and passwords" below
 - `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId, PagoDeTarjetaId)` — the last two are the D2 axes
 - `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite)`
 - `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial)` — UNIQUE(UsuarioId, Nombre). There is **no stored current balance**: see "Derived balances" below

@@ -4,6 +4,8 @@ using System.Windows;
 using System.Windows.Media;
 using FinanzasPersonales.Data;
 using FinanzasPersonales.Models;
+using FinanzasPersonales.Services;
+using System.Windows.Input;
 
 namespace FinanzasPersonales.ViewModels;
 
@@ -74,7 +76,7 @@ public class DashboardViewModel : BaseViewModel
     public decimal GastosMes
     {
         get => _gastosMes;
-        private set { _gastosMes = value; OnPropertyChanged(); OnPropertyChanged(nameof(GastosMesTexto)); OnPropertyChanged(nameof(PresupuestoExcedido)); OnPropertyChanged(nameof(PresupuestoTexto)); }
+        private set { _gastosMes = value; OnPropertyChanged(); OnPropertyChanged(nameof(GastosMesTexto)); NotificarPresupuesto(); }
     }
     public string GastosMesTexto => $"₡{_gastosMes:N0}";
 
@@ -102,14 +104,115 @@ public class DashboardViewModel : BaseViewModel
         TarjetasProximasPago.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     // ── Presupuesto ───────────────────────────────────────────────────────────
+    // Es de cada usuario y se edita aquí mismo. Antes era una clave global fija en ₡500.000 que
+    // no se podía cambiar, y sólo avisaba cuando ya se había superado.
     private decimal _presupuesto;
 
-    public bool       PresupuestoExcedido    => _presupuesto > 0 && _gastosMes > _presupuesto;
+    /// <summary>Fracción gastada desde la que la barra avisa en amarillo.</summary>
+    public const decimal UmbralAviso = 0.8m;
+
+    public bool TienePresupuesto    => _presupuesto > 0;
+    public bool PresupuestoExcedido => TienePresupuesto && _gastosMes > _presupuesto;
     public Visibility BannerPresupuestoVisibility =>
         PresupuestoExcedido ? Visibility.Visible : Visibility.Collapsed;
-    public string     PresupuestoTexto       => _presupuesto > 0
+    public string     PresupuestoTexto       => TienePresupuesto
         ? $"⚠ Gastos del mes (₡{_gastosMes:N0}) superan el presupuesto (₡{_presupuesto:N0})"
         : string.Empty;
+
+    /// <summary>Gastado / presupuesto. Puede pasar de 1.</summary>
+    public decimal PresupuestoFraccion => TienePresupuesto ? _gastosMes / _presupuesto : 0m;
+
+    public string PresupuestoUsoTexto => $"₡{_gastosMes:N0} de ₡{_presupuesto:N0}  ·  {PresupuestoFraccion:P0}";
+
+    public string PresupuestoRestanteTexto => _gastosMes <= _presupuesto
+        ? $"Te quedan ₡{_presupuesto - _gastosMes:N0}"
+        : $"Te pasaste por ₡{_gastosMes - _presupuesto:N0}";
+
+    /// <summary>Verde, amarillo desde el 80 %, rojo al pasarse.</summary>
+    public string PresupuestoColor =>
+        PresupuestoExcedido                   ? "#F38BA8" :
+        PresupuestoFraccion >= UmbralAviso    ? "#F9E2AF" : "#A6E3A1";
+
+    // La barra son dos columnas en estrella: lo gastado y lo que queda.
+    public GridLength BarraLlena => new((double)Math.Min(PresupuestoFraccion, 1m), GridUnitType.Star);
+    public GridLength BarraVacia => new((double)Math.Max(1m - PresupuestoFraccion, 0m), GridUnitType.Star);
+
+    public Visibility ConPresupuestoVisibility => TienePresupuesto && !_editandoPresupuesto ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SinPresupuestoVisibility => !TienePresupuesto && !_editandoPresupuesto ? Visibility.Visible : Visibility.Collapsed;
+
+    // Edición en la propia tarjeta
+    private bool   _editandoPresupuesto;
+    private string _presupuestoEditado = "";
+    private string _presupuestoError   = "";
+
+    public Visibility EdicionPresupuestoVisibility => _editandoPresupuesto ? Visibility.Visible : Visibility.Collapsed;
+
+    public string PresupuestoEditado
+    {
+        get => _presupuestoEditado;
+        set { _presupuestoEditado = value; OnPropertyChanged(); }
+    }
+    public string PresupuestoError
+    {
+        get => _presupuestoError;
+        set { _presupuestoError = value; OnPropertyChanged(); OnPropertyChanged(nameof(PresupuestoErrorVisibility)); }
+    }
+    public Visibility PresupuestoErrorVisibility =>
+        string.IsNullOrEmpty(_presupuestoError) ? Visibility.Collapsed : Visibility.Visible;
+
+    public ICommand EditarPresupuestoCommand   { get; }
+    public ICommand GuardarPresupuestoCommand  { get; }
+    public ICommand CancelarPresupuestoCommand { get; }
+
+    private void EditarPresupuesto()
+    {
+        PresupuestoEditado   = TienePresupuesto ? _presupuesto.ToString("N0") : "";
+        PresupuestoError     = "";
+        _editandoPresupuesto = true;
+        NotificarPresupuesto();
+    }
+
+    private void GuardarPresupuesto()
+    {
+        decimal monto = 0m;   // vacío = sin presupuesto
+        if (!string.IsNullOrWhiteSpace(_presupuestoEditado)
+            && (!Dinero.TryParse(_presupuestoEditado, out monto) || monto < 0))
+        {
+            PresupuestoError = "Monto inválido. Déjalo vacío o en 0 para no tener presupuesto.";
+            return;
+        }
+
+        _db.GuardarPresupuesto(_uid, monto);
+        _presupuesto         = monto;
+        _editandoPresupuesto = false;
+        PresupuestoError     = "";
+        NotificarPresupuesto();
+    }
+
+    private void CancelarPresupuesto()
+    {
+        _editandoPresupuesto = false;
+        PresupuestoError     = "";
+        NotificarPresupuesto();
+    }
+
+    /// <summary>
+    /// Todo lo que depende del presupuesto, en un solo sitio. Antes se notificaban dos
+    /// propiedades y no BannerPresupuestoVisibility —la que enlaza la vista—, así que el aviso
+    /// de "te pasaste" podía no aparecer o no irse al volver al Dashboard.
+    /// </summary>
+    private void NotificarPresupuesto()
+    {
+        foreach (var p in new[]
+                 {
+                     nameof(TienePresupuesto), nameof(PresupuestoExcedido), nameof(BannerPresupuestoVisibility),
+                     nameof(PresupuestoTexto), nameof(PresupuestoFraccion), nameof(PresupuestoUsoTexto),
+                     nameof(PresupuestoRestanteTexto), nameof(PresupuestoColor), nameof(BarraLlena),
+                     nameof(BarraVacia), nameof(ConPresupuestoVisibility), nameof(SinPresupuestoVisibility),
+                     nameof(EdicionPresupuestoVisibility)
+                 })
+            OnPropertyChanged(p);
+    }
 
     // ── Alertas gastos urgentes ────────────────────────────────────────────────
     public Visibility AlertasVisibility =>
@@ -138,6 +241,9 @@ public class DashboardViewModel : BaseViewModel
         _db             = db;
         _uid            = usuarioId;
         CerrarMesCommand = new RelayCommand(EjecutarCierreMes);
+        EditarPresupuestoCommand   = new RelayCommand(EditarPresupuesto);
+        GuardarPresupuestoCommand  = new RelayCommand(GuardarPresupuesto);
+        CancelarPresupuestoCommand = new RelayCommand(CancelarPresupuesto);
         Cargar();
     }
 
@@ -179,9 +285,9 @@ public class DashboardViewModel : BaseViewModel
         // Deuda de tarjetas: compras a crédito que todavía no se han pagado.
         DeudaTarjetas = _db.ObtenerTarjetas(_uid).Sum(x => x.SaldoUsado);
 
-        // Presupuesto mensual
-        if (decimal.TryParse(_db.ObtenerConfig("presupuesto_mensual", "0"), out var pres))
-            _presupuesto = pres;
+        // Presupuesto mensual: de este usuario, no global.
+        _presupuesto = _db.ObtenerPresupuesto(_uid);
+        NotificarPresupuesto();
 
         UltimasTransacciones.Clear();
         foreach (var t in todas.Take(8))
