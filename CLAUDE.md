@@ -87,7 +87,7 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 - `Configuracion (Clave, Valor)` — seeded with `moneda='₡'`, `max_usuarios`. The monthly budget used to live here as one global key; it is now per user
 - `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion, PresupuestoMensual)` — Rol: "Admin"|"Normal". `PresupuestoMensual` (0 = none) drives the Dashboard budget card and alert, measured on the `AfectaPresupuesto` axis; edited on the card itself. See "Accounts and passwords" below
 - `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId, PagoDeTarjetaId)` — the last two are the D2 axes
-- `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite)`
+- `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite, CuentaId)` + `MovimientosMeta (Id, MetaId → CASCADE, Fecha, Monto, Tipo, TransaccionId → CASCADE)` — **decision D5: a goal is an earmark ("bolsillo") inside an account.** Its reserved amount is `Σ MovimientosMeta`, never stored. *Apartar* reserves without moving money (only `Cuenta.Libre = SaldoActual − Apartado` changes, and it cannot exceed what is free); *Usar* inserts a real expense from the goal's account plus a negative movement linked to it, in one transaction (deleting that expense cascades the movement back; editing it is refused); *Liberar* un-reserves without spending. `MontoActual` is now only the pre-D5 counter of goals without an account, turned into an initial earmark when their owner picks one (`AsignarCuentaAMeta`)
 - `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial)` — UNIQUE(UsuarioId, Nombre). There is **no stored current balance**: see "Derived balances" below
 - `TarjetasCredito (Id, UsuarioId, Nombre, LimiteCredito, DiaCierre, DiaPago)` — UNIQUE(UsuarioId, Nombre). No stored balance: see "Derived balances"
 - `GastosFijos` / `IngresosFijos (Id, UsuarioId, Nombre, Monto, Dia*Vencimiento|Ingreso, Dia*2, Activo, FechaInicio)` — `FechaInicio` (day 1 of the month) is the first month the item exists: their screens navigate between months (`ViewModels/MesNavegable`), and without it an item created today showed as unpaid in every earlier month. Rows from older databases took it from their first `PagosMensuales` month
@@ -260,9 +260,8 @@ viáticos are added to the net. The payroll rounds inconsistently, so comparison
 ## Integrity verification
 
 `Transacciones` is the ledger, and since D1/D3 account and card balances are derived from it, so
-they cannot drift. What is still kept by hand: `MetasAhorro.MontoActual` (D5 pending — a purely
-decorative counter today), `PeriodosLaborales`, and the `ResumenMensual` snapshots, which nothing
-recomputes when the month behind them changes. Dangling references are prevented by the foreign
+they cannot drift. What is still kept by hand: `PeriodosLaborales` and the `ResumenMensual` snapshots,
+which nothing recomputes when the month behind them changes. Goal earmarks are derived like balances (D5). Dangling references are prevented by the foreign
 keys (see "Foreign keys" above) and reported by `PRAGMA foreign_key_check`.
 
 `AppDatabase.VerificarIntegridad()` is the missing reconciliation. It is **read-only — it
@@ -283,7 +282,7 @@ empty list; that empty list is the exit criterion for any refactor of the money 
 
 - **Placeholder text on TextBox:** uses the `Tag` property — the style shows `Tag` as greyed hint when `Text == ""`.
 - **Pie/Bar charts:** `PieChartControl`/`BarChartControl` have a `Slices`/data DependencyProperty. Any assignment triggers `Redraw()` which rebuilds Canvas `Path`/shape elements.
-- **Goals VM wrapper:** `MetaAhorroVm` (nested in `MetasViewModel.cs`) wraps `MetaAhorro` and adds `MontoAgregar` + `AgregarDineroCommand` so each card has its own text field binding.
+- **Goals VM wrapper:** `MetaAhorroVm` (in `MetasViewModel.cs`) wraps `MetaAhorro` with its own amount field, the Apartar / Usar / Liberar commands and its own error message, so each card reports errors next to itself.
 - **Monto coloring in DataGrid:** done with inline `DataTrigger` on `Tipo == "Gasto"` — no converter needed.
 - **PDF exports:** `PdfExportService` (general finance report) and `PdfLaboralService` (Control Laboral payroll report) build documents with QuestPDF's fluent `Document.Create` API and save to `MyDocuments`.
 

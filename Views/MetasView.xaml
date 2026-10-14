@@ -10,8 +10,13 @@
         </Grid.RowDefinitions>
 
         <!-- Título -->
-        <TextBlock Grid.Row="0" Text="Metas de Ahorro"
-                   FontSize="26" FontWeight="Bold" Margin="0,0,0,20"/>
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Metas de Ahorro" FontSize="26" FontWeight="Bold"/>
+            <!-- D5: una meta es un apartado dentro de una cuenta, no un contador suelto. -->
+            <TextBlock Text="Cada meta reserva parte del dinero de una cuenta. Apartar no saca dinero de la cuenta: sólo le da un destino. Usar registra el gasto real."
+                       Foreground="{StaticResource TextMutedBrush}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,6,0,0"/>
+        </StackPanel>
 
         <!-- Formulario nueva meta -->
         <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,20">
@@ -22,11 +27,13 @@
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="150"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="12"/>
                         <ColumnDefinition Width="160"/>
-                        <ColumnDefinition Width="16"/>
-                        <ColumnDefinition Width="180"/>
-                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="12"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
@@ -36,13 +43,19 @@
 
                     <TextBox Grid.Column="2"
                              Text="{Binding MontoObjetivo, UpdateSourceTrigger=PropertyChanged}"
-                             Tag="Monto objetivo ($)"/>
+                             Tag="₡ Monto objetivo"/>
 
-                    <DatePicker Grid.Column="4"
-                                    SelectedDate="{Binding FechaLimite}"
-                                    FirstDayOfWeek="Monday"/>
+                    <ComboBox Grid.Column="4"
+                              ItemsSource="{Binding Cuentas}"
+                              SelectedItem="{Binding CuentaNueva}"
+                              DisplayMemberPath="Nombre"
+                              ToolTip="Cuenta donde está el dinero de la meta"/>
 
-                    <Button Grid.Column="6"
+                    <DatePicker Grid.Column="6"
+                                SelectedDate="{Binding FechaLimite}"
+                                FirstDayOfWeek="Monday"/>
+
+                    <Button Grid.Column="8"
                             Content="Crear Meta"
                             Style="{StaticResource PrimaryButton}"
                             Command="{Binding CrearMetaCommand}"/>
@@ -50,7 +63,7 @@
 
                 <TextBlock Text="{Binding MensajeError}"
                            Foreground="{StaticResource RedBrush}"
-                           FontSize="12" Margin="0,10,0,0"
+                           FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
                            Visibility="{Binding MensajeErrorVisibility}"/>
             </StackPanel>
         </Border>
@@ -73,17 +86,20 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Style="{StaticResource Card}" Width="300" Margin="0,0,16,16">
+                            <Border Style="{StaticResource Card}" Width="340" Margin="0,0,16,16">
                                 <StackPanel>
 
-                                    <!-- Nombre -->
+                                    <!-- Nombre, cuenta y fecha -->
                                     <TextBlock Text="{Binding Nombre}"
                                                FontSize="17" FontWeight="Bold" Margin="0,0,0,4"/>
-                                    <TextBlock Text="{Binding FechaLimite, StringFormat='Vence: {0:dd/MM/yyyy}'}"
-                                               Foreground="{StaticResource TextMutedBrush}"
-                                               FontSize="12" Margin="0,0,0,12"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                        <TextBlock Text="{Binding CuentaTexto}"
+                                                   Foreground="{StaticResource AccentLightBrush}" FontSize="12"/>
+                                        <TextBlock Text="{Binding FechaLimite, StringFormat='  ·  Vence: {0:dd/MM/yyyy}'}"
+                                                   Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                    </StackPanel>
 
-                                    <!-- Progreso -->
+                                    <!-- Progreso: lo apartado frente al objetivo -->
                                     <Grid Margin="0,0,0,8">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -102,32 +118,80 @@
                                     <ProgressBar Maximum="100"
                                                  Value="{Binding ProgresoPercent, Mode=OneWay}"
                                                  Foreground="{Binding ProgresBrush}"
-                                                 Margin="0,0,0,16"/>
+                                                 Margin="0,0,0,14"/>
 
-                                    <!-- Agregar dinero -->
-                                    <TextBlock Text="Agregar dinero:"
-                                               Foreground="{StaticResource TextMutedBrush}"
-                                               FontSize="12" Margin="0,0,0,6"/>
-                                    <Grid Margin="0,0,0,12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="8"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox Grid.Column="0"
-                                                 Text="{Binding MontoAgregar, UpdateSourceTrigger=PropertyChanged}"
-                                                 Tag="Monto ($)"/>
-                                        <Button Grid.Column="2"
-                                                Content="+ Agregar"
-                                                Style="{StaticResource SecondaryButton}"
-                                                Command="{Binding AgregarDineroCommand}"/>
-                                    </Grid>
+                                    <!-- Meta de antes de D5: falta elegir la cuenta -->
+                                    <StackPanel Visibility="{Binding SinCuentaVisibility}" Margin="0,0,0,12">
+                                        <TextBlock Text="{Binding SinCuentaTexto}"
+                                                   Foreground="{StaticResource YellowBrush}" FontSize="12"
+                                                   TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox ItemsSource="{Binding Cuentas}"
+                                                      SelectedItem="{Binding CuentaParaAsignar}"
+                                                      DisplayMemberPath="Nombre"/>
+                                            <Button Grid.Column="2" Content="Asignar"
+                                                    Style="{StaticResource PrimaryButton}"
+                                                    Command="{Binding AsignarCuentaCommand}"/>
+                                        </Grid>
+                                    </StackPanel>
+
+                                    <!-- Apartar / Liberar / Usar -->
+                                    <StackPanel Visibility="{Binding ConCuentaVisibility}">
+                                        <TextBlock Text="{Binding LibreTexto}"
+                                                   Foreground="{StaticResource TextMutedBrush}"
+                                                   FontSize="11" Margin="0,0,0,6"/>
+                                        <TextBox Text="{Binding Monto, UpdateSourceTrigger=PropertyChanged}"
+                                                 Tag="₡ Monto" Margin="0,0,0,8"/>
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8"
+                                                    Visibility="{Binding AccionesVisibility}">
+                                            <Button Content="Apartar" ToolTip="Reservar este monto de la cuenta para la meta"
+                                                    Style="{StaticResource PrimaryButton}" Padding="12,6"
+                                                    Command="{Binding ApartarCommand}"/>
+                                            <Button Content="Usar…" ToolTip="Registrar un gasto con el dinero de la meta"
+                                                    Style="{StaticResource SecondaryButton}" Padding="12,6" Margin="8,0,0,0"
+                                                    Command="{Binding EmpezarUsoCommand}"/>
+                                            <Button Content="Liberar" ToolTip="Dejar de reservarlo, sin gastarlo"
+                                                    Style="{StaticResource SecondaryButton}" Padding="12,6" Margin="8,0,0,0"
+                                                    Command="{Binding LiberarCommand}"/>
+                                        </StackPanel>
+
+                                        <!-- Usar: se registra como un gasto real -->
+                                        <StackPanel Visibility="{Binding UsoVisibility}" Margin="0,0,0,8">
+                                            <TextBlock Text="Se registrará como gasto desde la cuenta de la meta."
+                                                       Foreground="{StaticResource TextMutedBrush}"
+                                                       FontSize="11" Margin="0,0,0,6"/>
+                                            <ComboBox ItemsSource="{Binding CategoriasGasto}"
+                                                      SelectedItem="{Binding CategoriaUso}"
+                                                      Margin="0,0,0,6"/>
+                                            <TextBox Text="{Binding DescripcionUso, UpdateSourceTrigger=PropertyChanged}"
+                                                     Tag="Descripción" Margin="0,0,0,8"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="Registrar gasto"
+                                                        Style="{StaticResource PrimaryButton}" Padding="12,6"
+                                                        Command="{Binding ConfirmarUsoCommand}"/>
+                                                <Button Content="Cancelar"
+                                                        Style="{StaticResource SecondaryButton}" Padding="12,6" Margin="8,0,0,0"
+                                                        Command="{Binding CancelarUsoCommand}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <TextBlock Text="{Binding MensajeError}"
+                                               Foreground="{StaticResource RedBrush}"
+                                               FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
+                                               Visibility="{Binding MensajeErrorVisibility}"/>
 
                                     <!-- Eliminar -->
                                     <Button Content="Eliminar meta"
                                             Style="{StaticResource DangerButton}"
                                             Command="{Binding EliminarCommand}"
-                                            HorizontalAlignment="Left"/>
+                                            HorizontalAlignment="Left" Margin="0,4,0,0"/>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>

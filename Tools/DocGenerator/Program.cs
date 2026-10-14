@@ -164,7 +164,7 @@ Bullet(body, "IngresosFijos — Id, Nombre, Monto, DiaIngreso, DiaIngreso2, Acti
 Bullet(body, "PagosMensuales — registra si un gasto/ingreso fijo fue pagado en un mes " +
              "específico (FijoId, TipoFijo, Anio, Mes, Dia, Pagado, MetodoPago).");
 Bullet(body, "TarjetasCredito — Id, Nombre, LimiteCredito, DiaCierre, DiaPago, SaldoUsado.");
-Bullet(body, "MetasAhorro — Id, Nombre, MontoObjetivo, MontoActual, FechaLimite.");
+Bullet(body, "MetasAhorro — Id, Nombre, MontoObjetivo, FechaLimite, CuentaId: un apartado dentro de una cuenta; lo apartado sale de MovimientosMeta.");
 Bullet(body, "Categorias — Id, Nombre, Tipo (\"Ingreso\"/\"Gasto\"), Color.");
 Bullet(body, "Usuarios — Id, Username, PasswordHash (PBKDF2-SHA256 con sal por usuario, 600.000 iteraciones).");
 

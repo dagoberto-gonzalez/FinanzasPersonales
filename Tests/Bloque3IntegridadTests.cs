@@ -226,7 +226,8 @@ public class Bloque3IntegridadTests
         t.Db.InsertarCategoria("Propia", otro);
         t.Db.InsertarMeta(new MetaAhorro
         {
-            Nombre = "Viaje", MontoObjetivo = 100000, FechaLimite = new DateTime(2027, 1, 1)
+            Nombre = "Viaje", MontoObjetivo = 100000, FechaLimite = new DateTime(2027, 1, 1),
+            CuentaId = t.Db.ObtenerCuentas(otro).Single().Id   // D5: la meta vive en una cuenta
         }, otro);
 
         t.Db.EliminarUsuario(otro);
@@ -290,7 +291,8 @@ public class Bloque3IntegridadTests
         t.Db.InsertarCuenta(new Cuenta { Nombre = "Suya" }, otro);
         t.Db.InsertarMeta(new MetaAhorro
         {
-            Nombre = "Viaje", MontoObjetivo = 100000, FechaLimite = new DateTime(2027, 1, 1)
+            Nombre = "Viaje", MontoObjetivo = 100000, FechaLimite = new DateTime(2027, 1, 1),
+            CuentaId = t.Db.ObtenerCuentas(otro).Single().Id   // D5: la meta vive en una cuenta
         }, otro);
 
         // Se borra sólo la fila del usuario: el resto lo arrastra la cascada.

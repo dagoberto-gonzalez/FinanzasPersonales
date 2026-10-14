@@ -42,6 +42,10 @@ public class DashboardViewModel : BaseViewModel
     }
 
     public string BalanceTotalTexto => $"₡{_balanceTotal:N0}";
+
+    private decimal _apartadoMetas;
+    public string     ApartadoMetasTexto      => $"₡{_apartadoMetas:N0}";
+    public Visibility ApartadoMetasVisibility => _apartadoMetas > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Brush  BalanceBrush      => _balanceTotal >= 0 ? BrushVerde : BrushRojo;
 
     // ── Deuda de tarjetas ─────────────────────────────────────────────────────
@@ -284,6 +288,12 @@ public class DashboardViewModel : BaseViewModel
 
         // Deuda de tarjetas: compras a crédito que todavía no se han pagado.
         DeudaTarjetas = _db.ObtenerTarjetas(_uid).Sum(x => x.SaldoUsado);
+
+        // D5: dinero que sigue en las cuentas pero reservado para metas. Se muestra aparte, sin
+        // restarlo del disponible: es tuyo y está ahí, sólo que ya tiene destino.
+        _apartadoMetas = _db.ObtenerCuentas(_uid).Sum(c => c.Apartado);
+        OnPropertyChanged(nameof(ApartadoMetasTexto));
+        OnPropertyChanged(nameof(ApartadoMetasVisibility));
 
         // Presupuesto mensual: de este usuario, no global.
         _presupuesto = _db.ObtenerPresupuesto(_uid);

@@ -19,6 +19,18 @@ public class Cuenta
     /// </summary>
     public decimal SaldoActual  { get; set; }
 
+    /// <summary>
+    /// Lo reservado en metas de esta cuenta (D5). Calculado de los movimientos de las metas, como
+    /// el saldo: no se almacena. El dinero sigue en la cuenta; sólo tiene destino.
+    /// </summary>
+    public decimal Apartado { get; set; }
+
+    /// <summary>Lo que no está reservado para ninguna meta. Negativo si se gastó dinero apartado.</summary>
+    public decimal Libre => SaldoActual - Apartado;
+
+    public string ApartadoDisplay => Apartado > 0 ? $"₡{Apartado:N0}" : "—";
+    public string LibreDisplay    => $"₡{Libre:N0}";
+
     public string EstadoTexto  => Activa ? "Activa" : "Inactiva";
     public string BancoDisplay => string.IsNullOrWhiteSpace(Banco) ? "—" : Banco;
     public string SaldoDisplay => $"₡{SaldoActual:N0}";
