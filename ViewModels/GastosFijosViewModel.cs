@@ -100,9 +100,25 @@ public class GastosFijosViewModel : BaseViewModel
     public ObservableCollection<string> MetodosPago { get; } = [];
     private readonly Dictionary<string, (int? CuentaId, int? TarjetaId)> _metodosMap = [];
 
-    public int    Anio        { get; private set; }
-    public int    Mes         { get; private set; }
-    public string MesAnioTexto => $"Mes actual — {new DateTime(Anio, Mes, 1):MMMM yyyy}";
+    // ── Mes que se mira ───────────────────────────────────────────────────────
+    // Antes la pantalla estaba clavada al mes actual: no había forma de ver si se pagó algo en
+    // septiembre ni de marcar un pago del mes pasado que se olvidó registrar.
+    private readonly MesNavegable _mes = new();
+
+    public int    Anio         => _mes.Anio;
+    public int    Mes          => _mes.Mes;
+    public string MesAnioTexto => _mes.Texto;
+    public Visibility VolverAlActualVisibility => _mes.VolverVisibility;
+
+    public ICommand MesAnteriorCommand  { get; }
+    public ICommand MesSiguienteCommand { get; }
+    public ICommand MesActualCommand    { get; }
+
+    private void IrA(Action mover)
+    {
+        mover();
+        Cargar();
+    }
 
     // ── Resumen ───────────────────────────────────────────────────────────────
     private decimal _totalPendiente;
@@ -127,6 +143,9 @@ public class GastosFijosViewModel : BaseViewModel
         TogglePagoCommand = new RelayCommand<GastoFijoVm>(TogglePago);
         EditarCommand    = new RelayCommand<GastoFijoVm>(Editar);
         CancelarEdicionCommand = new RelayCommand(LimpiarFormulario);
+        MesAnteriorCommand  = new RelayCommand(() => IrA(_mes.Anterior));
+        MesSiguienteCommand = new RelayCommand(() => IrA(_mes.Siguiente));
+        MesActualCommand    = new RelayCommand(() => IrA(_mes.Actual));
         Cargar();
     }
 
@@ -134,9 +153,11 @@ public class GastosFijosViewModel : BaseViewModel
 
     private void Cargar()
     {
-        var ahora = DateTime.Today;
-        Anio = ahora.Year;
-        Mes  = ahora.Month;
+        _mes.SeguirAlActual();
+        OnPropertyChanged(nameof(Anio));
+        OnPropertyChanged(nameof(Mes));
+        OnPropertyChanged(nameof(MesAnioTexto));
+        OnPropertyChanged(nameof(VolverAlActualVisibility));
 
         // Reconstruir métodos de pago desde cuentas y tarjetas reales
         _metodosMap.Clear();
@@ -214,7 +235,10 @@ public class GastosFijosViewModel : BaseViewModel
             Nombre          = _nombre.Trim(),
             Monto           = montoDecimal,
             DiaVencimiento  = dia,
-            DiaVencimiento2 = dia2
+            DiaVencimiento2 = dia2,
+            // Existe desde el mes que se está mirando: así se puede dar de alta en septiembre
+            // un gasto que ya se pagaba entonces y marcar ese pago.
+            FechaInicio     = _mes.Inicio
         };
 
         try

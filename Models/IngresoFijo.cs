@@ -11,6 +11,9 @@ public class IngresoFijo
 
     public int? CuentaId { get; set; }
 
+    /// <summary>Primer mes en que existe (día 1); ver <see cref="GastoFijo.FechaInicio"/>.</summary>
+    public DateTime FechaInicio { get; set; }
+
     // Populado por AppDatabase al cargar con estado
     public int  DiaEspecifico   { get; set; }
     public bool RecibidoEsteMes { get; set; }
