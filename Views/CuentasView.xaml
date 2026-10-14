@@ -113,6 +113,14 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
 
+                            <!-- D5: lo reservado en metas sigue en la cuenta; LIBRE es lo que no tiene destino. -->
+                            <DataGridTextColumn Header="EN METAS"
+                                                Binding="{Binding ApartadoDisplay}"
+                                                Width="110"/>
+                            <DataGridTextColumn Header="LIBRE"
+                                                Binding="{Binding LibreDisplay}"
+                                                Width="110"/>
+
                             <DataGridTemplateColumn Header="ESTADO" Width="90">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>

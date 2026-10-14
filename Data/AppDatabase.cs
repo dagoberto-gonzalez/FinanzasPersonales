@@ -199,6 +199,7 @@ public class AppDatabase
         MigrarTipoDeCategoria(conn);
         MigrarInicioDeFijos(conn);
         MigrarPresupuestoPorUsuario(conn);
+        MigrarMetasAApartados(conn);
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -618,6 +619,38 @@ public class AppDatabase
                 (SELECT CAST(Valor AS REAL) FROM Configuracion WHERE Clave = 'presupuesto_mensual'), 0)
             """);
         EjecutarNonQuery(conn, "DELETE FROM Configuracion WHERE Clave = 'presupuesto_mensual'");
+    }
+
+    /// <summary>
+    /// D5: las metas pasan a ser apartados dentro de una cuenta. Añade la cuenta a cada meta y la
+    /// tabla de movimientos, de la que se calcula lo apartado.
+    /// <para>
+    /// Las metas que ya existían quedan sin cuenta: su dueño elige una en la pantalla de Metas, y
+    /// en ese momento su <c>MontoActual</c> (el contador de antes) se convierte en un apartado.
+    /// </para>
+    /// <para>
+    /// Si se borra la transacción de un "Usar", su movimiento se va con ella (CASCADE): el gasto
+    /// no ocurrió, así que el dinero vuelve a estar apartado.
+    /// </para>
+    /// </summary>
+    private static void MigrarMetasAApartados(SqliteConnection conn)
+    {
+        if (!GetColumnas(conn, "MetasAhorro").Contains("CuentaId"))
+            AddColumna(conn, "MetasAhorro", "CuentaId", "INTEGER REFERENCES Cuentas(Id)");
+
+        EjecutarNonQuery(conn, """
+            CREATE TABLE IF NOT EXISTS MovimientosMeta (
+                Id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                MetaId        INTEGER NOT NULL,
+                Fecha         TEXT    NOT NULL,
+                Monto         REAL    NOT NULL,
+                Tipo          TEXT    NOT NULL,
+                TransaccionId INTEGER,
+                FOREIGN KEY (MetaId)        REFERENCES MetasAhorro(Id)   ON DELETE CASCADE,
+                FOREIGN KEY (TransaccionId) REFERENCES Transacciones(Id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS IX_MovimientosMeta_MetaId ON MovimientosMeta(MetaId);
+            """);
     }
 
     /// <summary>Presupuesto mensual del usuario. 0 = no tiene.</summary>
@@ -1417,6 +1450,14 @@ public class AppDatabase
             return "Es un ingreso de Control Laboral, que guarda su propio monto: se gestiona " +
                    "desde el historial de Control Laboral.";
 
+        // Su monto también descontó lo apartado en la meta: editarlo aquí dejaría la meta
+        // descuadrada. Borrarlo sí se puede: el movimiento se va con él y el dinero vuelve a
+        // estar apartado.
+        if (EjecutarScalar<long>(conn,
+                "SELECT COUNT(*) FROM MovimientosMeta WHERE TransaccionId=$id", ("$id", transaccionId)) > 0)
+            return "Es un gasto hecho con el dinero de una meta: si te equivocaste, bórralo (el " +
+                   "dinero vuelve a la meta) y vuelve a usarlo desde Metas.";
+
         return null;
     }
 
@@ -1551,27 +1592,41 @@ public class AppDatabase
 
     // ── Metas de Ahorro ───────────────────────────────────────────────────────
 
+    // Una meta es un apartado dentro de una cuenta (D5): el dinero no sale de la cuenta al
+    // apartarlo, sólo queda reservado. Lo apartado se calcula de MovimientosMeta, nunca se guarda.
+    // ActualizarMontoMeta() —que sobrescribía un contador sin relación con ninguna cuenta— ya no existe.
+
+    /// <summary>Crea una meta. Ahora tiene que decir en qué cuenta está el dinero.</summary>
     public void InsertarMeta(MetaAhorro m, int usuarioId)
     {
+        if (string.IsNullOrWhiteSpace(m.Nombre)) throw new ArgumentException("Escribe un nombre para la meta.");
+        if (m.MontoObjetivo <= 0)                throw new ArgumentException("El monto objetivo tiene que ser mayor que cero.");
+        if (m.CuentaId is not { } cuentaId)       throw new ArgumentException("Elige la cuenta donde está el dinero.");
+        ExigirCuentaPropia(cuentaId, usuarioId);
+
         using var conn = Abrir();
-        using var cmd  = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO MetasAhorro (UsuarioId,Nombre,MontoObjetivo,MontoActual,FechaLimite)
-            VALUES ($uid,$n,$obj,$act,$f)
-            """;
-        cmd.Parameters.AddWithValue("$uid", usuarioId);
-        cmd.Parameters.AddWithValue("$n",   m.Nombre);
-        cmd.Parameters.AddWithValue("$obj", (double)m.MontoObjetivo);
-        cmd.Parameters.AddWithValue("$act", (double)m.MontoActual);
-        cmd.Parameters.AddWithValue("$f",   m.FechaLimite.ToString("yyyy-MM-dd"));
-        cmd.ExecuteNonQuery();
+        EjecutarNonQuery(conn,
+            """
+            INSERT INTO MetasAhorro (UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite, CuentaId)
+            VALUES ($uid, $n, $obj, 0, $f, $cid)
+            """,
+            ("$uid", usuarioId), ("$n", m.Nombre.Trim()), ("$obj", (double)m.MontoObjetivo),
+            ("$f", m.FechaLimite.ToString("yyyy-MM-dd")), ("$cid", cuentaId));
     }
 
     public List<MetaAhorro> ObtenerMetas(int usuarioId)
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
-        cmd.CommandText = "SELECT Id,Nombre,MontoObjetivo,MontoActual,FechaLimite FROM MetasAhorro WHERE UsuarioId=$uid";
+        cmd.CommandText = """
+            SELECT m.Id, m.Nombre, m.MontoObjetivo, m.MontoActual, m.FechaLimite, m.CuentaId,
+                   COALESCE(c.Nombre, ''),
+                   COALESCE((SELECT SUM(mm.Monto) FROM MovimientosMeta mm WHERE mm.MetaId = m.Id), 0)
+            FROM MetasAhorro m
+            LEFT JOIN Cuentas c ON c.Id = m.CuentaId
+            WHERE m.UsuarioId = $uid
+            ORDER BY m.FechaLimite, m.Nombre
+            """;
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<MetaAhorro>();
         using var r = cmd.ExecuteReader();
@@ -1581,25 +1636,158 @@ public class AppDatabase
                 Id            = r.GetInt32(0),
                 Nombre        = r.GetString(1),
                 MontoObjetivo = (decimal)r.GetDouble(2),
-                MontoActual   = (decimal)r.GetDouble(3),
-                FechaLimite   = DateTime.Parse(r.GetString(4))
+                MontoAnterior = r.IsDBNull(5) ? (decimal)r.GetDouble(3) : 0m,
+                FechaLimite   = DateTime.Parse(r.GetString(4)),
+                CuentaId      = r.IsDBNull(5) ? null : r.GetInt32(5),
+                CuentaNombre  = r.GetString(6),
+                Apartado      = (decimal)r.GetDouble(7)
             });
         return list;
     }
 
-    public void ActualizarMontoMeta(int id, decimal montoActual)
-    {
-        using var conn = Abrir();
-        EjecutarNonQuery(conn,
-            "UPDATE MetasAhorro SET MontoActual=$m WHERE Id=$id",
-            ("$m", (double)montoActual), ("$id", id));
-    }
-
+    /// <summary>
+    /// Borra la meta y sus movimientos: lo apartado vuelve a estar libre. Lo que ya se usó se
+    /// queda como gasto: el dinero se gastó de verdad.
+    /// </summary>
     public void EliminarMeta(int id)
     {
         using var conn = Abrir();
         EjecutarNonQuery(conn, "DELETE FROM MetasAhorro WHERE Id=$id", ("$id", id));
     }
+
+    /// <summary>
+    /// Elige la cuenta de una meta creada antes de D5. Lo que tenía su contador viejo pasa a ser
+    /// un apartado en esa cuenta, siempre que quepa en lo libre.
+    /// </summary>
+    public void AsignarCuentaAMeta(int metaId, int cuentaId, int usuarioId)
+    {
+        var meta = ObtenerMetaPropia(metaId, usuarioId);
+        if (meta.TieneCuenta) throw new InvalidOperationException("La meta ya tiene cuenta.");
+        ExigirCuentaPropia(cuentaId, usuarioId);
+
+        using var conn = Abrir();
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            EjecutarNonQuery(conn, "UPDATE MetasAhorro SET CuentaId=$c, MontoActual=0 WHERE Id=$id",
+                ("$c", cuentaId), ("$id", metaId));
+            if (meta.MontoAnterior > 0)
+            {
+                ExigirLibre(conn, cuentaId, meta.MontoAnterior);
+                InsertarMovimiento(conn, metaId, meta.MontoAnterior, MovimientoMeta.TipoApartar, null);
+            }
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
+    }
+
+    /// <summary>Reserva dinero de la cuenta para la meta. No sale dinero: sólo cambia lo libre.</summary>
+    public void ApartarEnMeta(int metaId, decimal monto, int usuarioId)
+    {
+        if (monto <= 0) throw new ArgumentException("El monto tiene que ser mayor que cero.");
+        var meta = ObtenerMetaPropia(metaId, usuarioId);
+        if (meta.CuentaId is not { } cuentaId)
+            throw new InvalidOperationException("Primero elige la cuenta de la meta.");
+
+        using var conn = Abrir();
+        ExigirLibre(conn, cuentaId, monto);
+        InsertarMovimiento(conn, metaId, monto, MovimientoMeta.TipoApartar, null);
+    }
+
+    /// <summary>Deja de reservar dinero: vuelve a lo libre de la cuenta sin gastarse.</summary>
+    public void LiberarDeMeta(int metaId, decimal monto, int usuarioId)
+    {
+        if (monto <= 0) throw new ArgumentException("El monto tiene que ser mayor que cero.");
+        var meta = ObtenerMetaPropia(metaId, usuarioId);
+        ExigirApartado(meta, monto);
+
+        using var conn = Abrir();
+        InsertarMovimiento(conn, metaId, -monto, MovimientoMeta.TipoLiberar, null);
+    }
+
+    /// <summary>
+    /// Gasta dinero apartado: registra un gasto real desde la cuenta de la meta (el saldo baja,
+    /// cuenta en reportes) y baja el apartado en lo mismo. Todo o nada.
+    /// </summary>
+    public void UsarDeMeta(int metaId, decimal monto, string categoria, string descripcion,
+                           DateTime fecha, int usuarioId)
+    {
+        if (monto <= 0) throw new ArgumentException("El monto tiene que ser mayor que cero.");
+        var meta = ObtenerMetaPropia(metaId, usuarioId);
+        if (meta.CuentaId is not { } cuentaId)
+            throw new InvalidOperationException("Primero elige la cuenta de la meta.");
+        ExigirApartado(meta, monto);
+
+        var t = new Transaccion
+        {
+            Tipo = "Gasto", Monto = monto, Categoria = categoria,
+            Descripcion = string.IsNullOrWhiteSpace(descripcion) ? meta.Nombre : descripcion.Trim(),
+            Notas = $"Usado de la meta «{meta.Nombre}»", Fecha = fecha,
+            CuentaId = cuentaId, CuentaNombre = meta.CuentaNombre
+        };
+        ValidarTransaccion(t);
+
+        using var conn = Abrir();
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            var txId = EjecutarScalar<long>(conn,
+                """
+                INSERT INTO Transacciones (UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId)
+                VALUES ($uid, 'Gasto', $m, $cat, $desc, $f, $notas, $cn, $cid);
+                SELECT last_insert_rowid();
+                """,
+                ("$uid", usuarioId), ("$m", (double)monto), ("$cat", t.Categoria), ("$desc", t.Descripcion),
+                ("$f", fecha.ToString("yyyy-MM-dd")), ("$notas", t.Notas), ("$cn", t.CuentaNombre),
+                ("$cid", cuentaId));
+            InsertarMovimiento(conn, metaId, -monto, MovimientoMeta.TipoUsar, (int)txId);
+            tr.Commit();
+        }
+        catch { tr.Rollback(); throw; }
+    }
+
+    private MetaAhorro ObtenerMetaPropia(int metaId, int usuarioId) =>
+        ObtenerMetas(usuarioId).FirstOrDefault(m => m.Id == metaId)
+        ?? throw new InvalidOperationException("La meta ya no existe.");
+
+    private void ExigirCuentaPropia(int cuentaId, int usuarioId)
+    {
+        if (ObtenerCuentas(usuarioId).All(c => c.Id != cuentaId))
+            throw new InvalidOperationException("Esa cuenta no existe.");
+    }
+
+    private static void ExigirApartado(MetaAhorro meta, decimal monto)
+    {
+        if (monto > meta.Apartado)
+            throw new InvalidOperationException(
+                $"La meta sólo tiene ₡{meta.Apartado:N0} apartados.");
+    }
+
+    /// <summary>
+    /// No se puede reservar más de lo que hay sin destino en la cuenta: el dinero apartado tiene
+    /// que existir de verdad.
+    /// </summary>
+    private static void ExigirLibre(SqliteConnection conn, int cuentaId, decimal monto)
+    {
+        var libre = (decimal)EjecutarScalar<double>(conn,
+            """
+            SELECT c.SaldoInicial
+                 + COALESCE((SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
+                             FROM Transacciones t WHERE t.CuentaId = c.Id), 0)
+                 - COALESCE((SELECT SUM(mm.Monto) FROM MovimientosMeta mm
+                             JOIN MetasAhorro ma ON ma.Id = mm.MetaId WHERE ma.CuentaId = c.Id), 0)
+            FROM Cuentas c WHERE c.Id = $id
+            """, ("$id", cuentaId));
+        if (monto > libre)
+            throw new InvalidOperationException(
+                $"En la cuenta sólo hay ₡{Math.Max(libre, 0):N0} sin destino: no se puede apartar ₡{monto:N0}.");
+    }
+
+    private static void InsertarMovimiento(SqliteConnection conn, int metaId, decimal monto, string tipo, int? transaccionId) =>
+        EjecutarNonQuery(conn,
+            "INSERT INTO MovimientosMeta (MetaId, Fecha, Monto, Tipo, TransaccionId) VALUES ($m, $f, $monto, $t, $tx)",
+            ("$m", metaId), ("$f", DateTime.Today.ToString("yyyy-MM-dd")), ("$monto", (double)monto),
+            ("$t", tipo), ("$tx", transaccionId.HasValue ? transaccionId.Value : DBNull.Value));
 
     // ── Tarjetas de Crédito ───────────────────────────────────────────────────
 
@@ -1719,7 +1907,11 @@ public class AppDatabase
             SELECT c.Id, c.Nombre, c.Tipo, c.Banco, c.Activa, c.SaldoInicial,
                    c.SaldoInicial + COALESCE(
                        (SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
-                        FROM Transacciones t WHERE t.CuentaId = c.Id), 0)
+                        FROM Transacciones t WHERE t.CuentaId = c.Id), 0),
+                   COALESCE(
+                       (SELECT SUM(mm.Monto) FROM MovimientosMeta mm
+                        JOIN MetasAhorro ma ON ma.Id = mm.MetaId
+                        WHERE ma.CuentaId = c.Id), 0)
             FROM Cuentas c
             WHERE c.UsuarioId = $uid
             ORDER BY c.Activa DESC, c.Nombre
@@ -1736,7 +1928,8 @@ public class AppDatabase
                 Banco        = r.GetString(3),
                 Activa       = r.GetInt32(4) == 1,
                 SaldoInicial = (decimal)r.GetDouble(5),
-                SaldoActual  = (decimal)r.GetDouble(6)
+                SaldoActual  = (decimal)r.GetDouble(6),
+                Apartado     = (decimal)r.GetDouble(7)
             });
         return list;
     }
@@ -1783,6 +1976,13 @@ public class AppDatabase
             throw new InvalidOperationException(
                 $"La cuenta tiene {movimientos} movimiento{(movimientos == 1 ? "" : "s")} registrado" +
                 $"{(movimientos == 1 ? "" : "s")}. Desactívala para dejar de usarla sin perder el historial.");
+
+        var metas = EjecutarScalar<long>(conn,
+            "SELECT COUNT(*) FROM MetasAhorro WHERE CuentaId=$id", ("$id", id));
+        if (metas > 0)
+            throw new InvalidOperationException(
+                $"La cuenta tiene {metas} meta{(metas == 1 ? "" : "s")} de ahorro. Elimínalas o " +
+                "desactiva la cuenta.");
 
         // Los ingresos fijos que apuntaran aquí quedarían colgando; se desvinculan.
         EjecutarNonQuery(conn, "UPDATE IngresosFijos SET CuentaId=NULL WHERE CuentaId=$id", ("$id", id));
@@ -3225,10 +3425,34 @@ public class AppDatabase
         }
 
         // ── 1. Cuentas ──
-        // Ya no hay nada que comprobar aquí: desde la decisión D1 el saldo de una cuenta se
-        // calcula (SaldoInicial + Σ transacciones) en lugar de mantenerse como contador, así
-        // que la deriva entre el saldo mostrado y las transacciones es imposible. La
-        // comprobación que vivía aquí pasaría siempre.
+        // El saldo no se comprueba: desde la decisión D1 se calcula (SaldoInicial + Σ
+        // transacciones), así que no puede desviarse de las transacciones.
+        // Lo que sí puede pasar desde D5: gastar por fuera de la meta dinero que estaba apartado,
+        // y quedar con más reservado que lo que hay. No es un error de la base —el dinero se
+        // gastó de verdad—, pero las metas prometen dinero que ya no está.
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT c.Nombre,
+                       c.SaldoInicial
+                     + COALESCE((SELECT SUM(CASE WHEN t.Tipo='Ingreso' THEN t.Monto ELSE -t.Monto END)
+                                 FROM Transacciones t WHERE t.CuentaId = c.Id), 0),
+                       COALESCE((SELECT SUM(mm.Monto) FROM MovimientosMeta mm
+                                 JOIN MetasAhorro ma ON ma.Id = mm.MetaId WHERE ma.CuentaId = c.Id), 0)
+                FROM Cuentas c
+                """;
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                decimal saldo = (decimal)r.GetDouble(1), apartado = (decimal)r.GetDouble(2);
+                // Sólo si hay algo apartado: una cuenta sin metas en negativo no promete nada.
+                if (apartado > 0.01m && apartado - saldo > 0.01m)
+                    Add(SeveridadProblema.Advertencia, "Metas",
+                        $"«{r.GetString(0)}» tiene más dinero apartado en metas que saldo.",
+                        $"Apartado {apartado:N2}, saldo {saldo:N2}. Se gastó dinero reservado por fuera " +
+                        "de las metas: libera la diferencia en alguna de ellas.");
+            }
+        }
 
         // ── 2. Tarjetas ──
         // Igual que con las cuentas en D1: desde D3 el saldo de la tarjeta se calcula
