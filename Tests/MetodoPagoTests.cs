@@ -169,11 +169,12 @@ public class MetodoPagoTests
     }
 
     /// <summary>
-    /// Las categorías que ofrece el formulario son las mismas en gasto y en ingreso: el modelo
-    /// no distingue unas de otras, y ahora incluye las del sistema (Salario, Gastos Fijos…).
+    /// Gasto e ingreso ofrecen categorías distintas. Esta prueba afirmaba lo contrario —que
+    /// eran las mismas porque el modelo no las distinguía—; desde que cada categoría tiene tipo
+    /// (Gasto / Ingreso / Ambos), un ingreso ya no ofrece "Alimentación". Ver TipoCategoriaTests.
     /// </summary>
     [Fact]
-    public void ElFormularioOfreceLasMismasCategoriasEnAmbosTipos()
+    public void ElFormularioOfreceCategoriasDistintasParaGastoEIngreso()
     {
         using var t  = new BaseDePrueba();
         var       vm = new TransaccionesViewModel(t.Db, t.UsuarioId);
@@ -181,8 +182,9 @@ public class MetodoPagoTests
         var enGasto = vm.CategoriasForm.ToList();
         vm.EsIngreso = true;
 
-        Assert.Equal(enGasto, vm.CategoriasForm);
+        Assert.NotEqual(enGasto, vm.CategoriasForm);
         Assert.Contains("Salario", vm.CategoriasForm);
+        Assert.DoesNotContain("Salario", enGasto);
     }
 
     /// <summary>

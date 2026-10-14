@@ -21,12 +21,19 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="12"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBox Grid.Column="0"
                                  Text="{Binding NuevaCategoria, UpdateSourceTrigger=PropertyChanged}"
                                  Tag="Nombre de la categoría"/>
-                        <Button Grid.Column="2"
+                        <!-- En Transacciones sólo se ofrece para este tipo de movimiento. -->
+                        <ComboBox Grid.Column="2"
+                                  ItemsSource="{Binding Tipos}"
+                                  SelectedItem="{Binding NuevaTipo}"
+                                  ToolTip="Para qué movimientos se ofrece en Transacciones"/>
+                        <Button Grid.Column="4"
                                 Content="Agregar"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding AgregarCommand}"
@@ -84,10 +91,15 @@
                                                            Foreground="{StaticResource AccentLightBrush}"/>
                                             </Border>
 
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding Nombre}"
-                                                       FontSize="13" FontWeight="SemiBold"
-                                                       VerticalAlignment="Center"/>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Nombre}"
+                                                           FontSize="13" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding TipoTexto}"
+                                                           Foreground="{StaticResource TextMutedBrush}"
+                                                           FontSize="11" Margin="10,0,0,0"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
 
                                             <!-- Las de sistema, y las globales para un usuario
                                                  normal, no ofrecen acciones: antes mostraban
@@ -115,6 +127,8 @@
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="8"/>
+                                                    <ColumnDefinition Width="110"/>
+                                                    <ColumnDefinition Width="8"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="8"/>
                                                     <ColumnDefinition Width="Auto"/>
@@ -125,14 +139,19 @@
                                                          Tag="Nuevo nombre"
                                                          VerticalAlignment="Center"/>
 
-                                                <Button Grid.Column="2"
+                                                <ComboBox Grid.Column="2"
+                                                          ItemsSource="{Binding Tipos}"
+                                                          SelectedItem="{Binding TipoEditado}"
+                                                          VerticalAlignment="Center"/>
+
+                                                <Button Grid.Column="4"
                                                         Content="Guardar"
                                                         Style="{StaticResource PrimaryButton}"
                                                         Padding="16,6"
                                                         VerticalAlignment="Center"
                                                         Command="{Binding GuardarCommand}"/>
 
-                                                <Button Grid.Column="4"
+                                                <Button Grid.Column="6"
                                                         Content="Cancelar"
                                                         Style="{StaticResource SecondaryButton}"
                                                         Padding="14,6"

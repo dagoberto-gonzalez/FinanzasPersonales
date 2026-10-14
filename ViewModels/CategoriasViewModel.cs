@@ -26,6 +26,24 @@ public class CategoriaVm : BaseViewModel
     public int    Id       => Datos.Id;
     public string Nombre   => Datos.Nombre;
     public bool   EsGlobal => Datos.EsGlobal;
+    public string Tipo     => Datos.Tipo;
+
+    /// <summary>Lo que se muestra en la fila: para qué movimientos se ofrece.</summary>
+    public string TipoTexto => Datos.Tipo switch
+    {
+        Categoria.TipoIngreso => "Ingresos",
+        Categoria.TipoAmbos   => "Gastos e ingresos",
+        _                     => "Gastos"
+    };
+
+    public IReadOnlyList<string> Tipos => Categoria.Tipos;
+
+    private string _tipoEditado = Categoria.TipoGasto;
+    public string TipoEditado
+    {
+        get => _tipoEditado;
+        set { _tipoEditado = value ?? Categoria.TipoGasto; OnPropertyChanged(); }
+    }
 
     /// <summary>Las de sistema las escribe la aplicación por nombre: no se tocan.</summary>
     public bool EsDeSistema => AppDatabase.EsCategoriaSistema(Datos.Nombre);
@@ -87,6 +105,7 @@ public class CategoriaVm : BaseViewModel
     public void Empezar()
     {
         NombreEditado = Nombre;
+        TipoEditado   = Tipo;
         MensajeError  = string.Empty;
         EnEdicion     = true;
     }
@@ -121,6 +140,16 @@ public class CategoriasViewModel : BaseViewModel
     {
         get => _nuevaEsGlobal;
         set { _nuevaEsGlobal = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Gasto, Ingreso o Ambos: en Transacciones sólo se ofrece para ese tipo.</summary>
+    public IReadOnlyList<string> Tipos => Categoria.Tipos;
+
+    private string _nuevaTipo = Categoria.TipoGasto;
+    public string NuevaTipo
+    {
+        get => _nuevaTipo;
+        set { _nuevaTipo = value ?? Categoria.TipoGasto; OnPropertyChanged(); }
     }
 
     public Visibility CheckGlobalVisibility =>
@@ -208,9 +237,10 @@ public class CategoriasViewModel : BaseViewModel
             return;
         }
 
-        _db.InsertarCategoria(nombre, _uid, EsAdmin && _nuevaEsGlobal);
+        _db.InsertarCategoria(nombre, _uid, EsAdmin && _nuevaEsGlobal, _nuevaTipo);
         NuevaCategoria = string.Empty;
         NuevaEsGlobal  = false;
+        NuevaTipo      = Categoria.TipoGasto;
         Cargar();
         MensajeOk = $"Categoría «{nombre}» creada.";
     }
@@ -239,7 +269,10 @@ public class CategoriasViewModel : BaseViewModel
             return;
         }
 
-        if (nombre == fila.Nombre)
+        bool cambiaNombre = nombre != fila.Nombre;
+        bool cambiaTipo   = fila.TipoEditado != fila.Tipo;
+
+        if (!cambiaNombre && !cambiaTipo)
         {
             fila.Cancelar();
             return;
@@ -247,7 +280,7 @@ public class CategoriasViewModel : BaseViewModel
 
         // Excluyendo la fila que se edita: si no, cambiar sólo las mayúsculas
         // («mascotas» → «Mascotas») se rechazaba como si ya existiera.
-        if (Categorias.Any(c => c.Id != fila.Id &&
+        if (cambiaNombre && Categorias.Any(c => c.Id != fila.Id &&
                                 c.Nombre.Equals(nombre, StringComparison.OrdinalIgnoreCase)))
         {
             fila.MensajeError = "Ya existe otra categoría con ese nombre.";
@@ -255,9 +288,13 @@ public class CategoriasViewModel : BaseViewModel
         }
 
         var anterior = fila.Nombre;
-        _db.ActualizarCategoria(fila.Id, nombre, _uid, EsAdmin);
+        if (cambiaNombre) _db.ActualizarCategoria(fila.Id, nombre, _uid, EsAdmin);
+        if (cambiaTipo)   _db.CambiarTipoCategoria(fila.Id, fila.TipoEditado, _uid, EsAdmin);
         Cargar();
-        MensajeOk = $"«{anterior}» ahora se llama «{nombre}». Las transacciones anteriores también.";
+
+        MensajeOk = cambiaNombre
+            ? $"«{anterior}» ahora se llama «{nombre}». Las transacciones anteriores también."
+            : $"«{nombre}» se ofrecerá para: {Categorias.FirstOrDefault(c => c.Id == fila.Id)?.TipoTexto.ToLower()}.";
     }
 
     // ── Baja ──────────────────────────────────────────────────────────────────
