@@ -43,6 +43,12 @@ public class DashboardViewModel : BaseViewModel
 
     public string BalanceTotalTexto => $"₡{_balanceTotal:N0}";
 
+    private decimal _enCuentas;
+    private decimal _enEfectivo;
+
+    /// <summary>De dónde sale el disponible, para poder cuadrarlo con Cuentas.</summary>
+    public string DesgloseDisponibleTexto => $"En cuentas ₡{_enCuentas:N0}  ·  En efectivo ₡{_enEfectivo:N0}";
+
     private decimal _apartadoMetas;
     public string     ApartadoMetasTexto      => $"₡{_apartadoMetas:N0}";
     public Visibility ApartadoMetasVisibility => _apartadoMetas > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -282,7 +288,18 @@ public class DashboardViewModel : BaseViewModel
         var efectivoTodas   = todas.Where(t => t.AfectaEfectivo).ToList();
         var presupuestoMes  = estesMes.Where(t => t.AfectaPresupuesto).ToList();
 
-        BalanceTotal = efectivoTodas.Sum(t => t.Tipo == "Ingreso" ? t.Monto : -t.Monto);
+        // Disponible = lo que hay en las cuentas + el efectivo (movimientos sin cuenta).
+        // Antes era sólo la suma de las transacciones del eje efectivo, que deja fuera el saldo
+        // inicial de cada cuenta: con ₡2.700.000 de saldos iniciales el Dashboard decía ₡162.000.
+        // Tomando el saldo de cada cuenta tal como lo calcula ObtenerCuentas, el Dashboard y la
+        // pantalla Cuentas no pueden dar cifras distintas.
+        var cuentas = _db.ObtenerCuentas(_uid);
+        _enCuentas  = cuentas.Sum(c => c.SaldoActual);
+        _enEfectivo = efectivoTodas.Where(t => t.CuentaId is null)
+                                   .Sum(t => t.Tipo == "Ingreso" ? t.Monto : -t.Monto);
+        BalanceTotal = _enCuentas + _enEfectivo;
+        OnPropertyChanged(nameof(DesgloseDisponibleTexto));
+
         IngresosMes  = presupuestoMes.Where(t => t.Tipo == "Ingreso").Sum(t => t.Monto);
         GastosMes    = presupuestoMes.Where(t => t.Tipo == "Gasto").Sum(t => t.Monto);
 
@@ -291,7 +308,7 @@ public class DashboardViewModel : BaseViewModel
 
         // D5: dinero que sigue en las cuentas pero reservado para metas. Se muestra aparte, sin
         // restarlo del disponible: es tuyo y está ahí, sólo que ya tiene destino.
-        _apartadoMetas = _db.ObtenerCuentas(_uid).Sum(c => c.Apartado);
+        _apartadoMetas = cuentas.Sum(c => c.Apartado);
         OnPropertyChanged(nameof(ApartadoMetasTexto));
         OnPropertyChanged(nameof(ApartadoMetasVisibility));
 

@@ -110,7 +110,9 @@ single figure was the source of the inconsistencies between screens. `Transaccio
   monthly/annual reports, `CerrarMes`, and the PDF. A card payment is not a new expense — it was
   already counted at purchase, and counting it again would double it.
 - **`AfectaEfectivo`** (`TarjetaCreditoId IS NULL`) drives account balances and the dashboard's
-  *Disponible*. A card purchase does not move money until the card is paid.
+  *Disponible*. A card purchase does not move money until the card is paid. *Disponible* is the
+  sum of `ObtenerCuentas` balances (opening balance included) plus cash — `AfectaEfectivo` rows
+  with no `CuentaId`. Summing transactions alone left out every opening balance.
 
 **Editing a transaction** (`ActualizarTransaccion`) is a plain `UPDATE` with the same rules as
 inserting (`ValidarTransaccion`) — balances follow on their own. Two kinds are refused, by
