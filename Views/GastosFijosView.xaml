@@ -6,8 +6,22 @@
         <StackPanel Margin="32,28">
 
             <TextBlock Text="Gastos Fijos" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
-            <TextBlock Text="{Binding MesAnioTexto}"
-                       Foreground="{StaticResource TextMutedBrush}" FontSize="13" Margin="0,0,0,24"/>
+            <!-- Navegación entre meses: antes la pantalla estaba clavada al mes actual. -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
+                <Button Content="‹" ToolTip="Mes anterior"
+                        Style="{StaticResource SecondaryButton}" Padding="10,2"
+                        Command="{Binding MesAnteriorCommand}"/>
+                <TextBlock Text="{Binding MesAnioTexto}" MinWidth="200" TextAlignment="Center"
+                           Foreground="{StaticResource TextMutedBrush}" FontSize="13"
+                           VerticalAlignment="Center" Margin="12,0"/>
+                <Button Content="›" ToolTip="Mes siguiente"
+                        Style="{StaticResource SecondaryButton}" Padding="10,2"
+                        Command="{Binding MesSiguienteCommand}"/>
+                <Button Content="Volver al mes actual"
+                        Style="{StaticResource SecondaryButton}" Padding="12,2" Margin="12,0,0,0"
+                        Command="{Binding MesActualCommand}"
+                        Visibility="{Binding VolverAlActualVisibility}"/>
+            </StackPanel>
 
             <!-- Tarjetas resumen -->
             <Grid Margin="0,0,0,24">

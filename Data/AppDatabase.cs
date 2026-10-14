@@ -197,6 +197,7 @@ public class AppDatabase
         // de columnas y perdería las que se añaden aquí.
         MigrarComprobantesDePago(conn);
         MigrarTipoDeCategoria(conn);
+        MigrarInicioDeFijos(conn);
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -568,6 +569,39 @@ public class AppDatabase
             EjecutarNonQuery(conn,
                 "INSERT INTO Categorias (UsuarioId, Nombre, Tipo) SELECT NULL,$n,$t WHERE NOT EXISTS (SELECT 1 FROM Categorias WHERE UsuarioId IS NULL AND Nombre=$n)",
                 ("$n", c), ("$t", TipoDeFabrica(c)));
+    }
+
+    /// <summary>
+    /// Añade a los gastos e ingresos fijos el mes desde el que existen, para que al navegar
+    /// hacia meses anteriores no aparezcan como pendientes antes de haberse creado.
+    /// <para>
+    /// No se guardaba en ninguna parte. Se toma el primer mes con registro en
+    /// <c>PagosMensuales</c>: la pantalla crea ese registro en cuanto se abre, así que casi
+    /// siempre coincide con el mes de alta. Si no hay ninguno, el mes actual.
+    /// </para>
+    /// </summary>
+    private static void MigrarInicioDeFijos(SqliteConnection conn)
+    {
+        foreach (var (tabla, tipo) in new[] { ("GastosFijos", "Gasto"), ("IngresosFijos", "Ingreso") })
+        {
+            if (GetColumnas(conn, tabla).Contains("FechaInicio")) continue;
+
+            AddColumna(conn, tabla, "FechaInicio", "TEXT NOT NULL DEFAULT '2000-01-01'");
+            EjecutarNonQuery(conn, $"""
+                UPDATE {tabla} SET FechaInicio = COALESCE(
+                    (SELECT printf('%04d-%02d-01', p.Anio, p.Mes) FROM PagosMensuales p
+                     WHERE p.TipoFijo = $t AND p.FijoId = {tabla}.Id
+                     ORDER BY p.Anio, p.Mes LIMIT 1),
+                    date('now', 'localtime', 'start of month'))
+                """, ("$t", tipo));
+        }
+    }
+
+    /// <summary>Día 1 del mes, como se guarda <c>FechaInicio</c>. <c>default</c> = el mes actual.</summary>
+    private static string InicioDeMes(DateTime fecha)
+    {
+        if (fecha == default) fecha = DateTime.Today;
+        return new DateTime(fecha.Year, fecha.Month, 1).ToString("yyyy-MM-dd");
     }
 
     /// <summary>Tipo de las categorías que trae la aplicación.</summary>
@@ -1733,7 +1767,7 @@ public class AppDatabase
             FROM GastosFijos g
             LEFT JOIN PagosMensuales p
                 ON p.FijoId=g.Id AND p.TipoFijo='Gasto' AND p.Anio=$a AND p.Mes=$m AND p.Dia=g.DiaVencimiento AND p.UsuarioId=$uid
-            WHERE g.Activo=1 AND g.UsuarioId=$uid
+            WHERE g.Activo=1 AND g.UsuarioId=$uid AND g.FechaInicio <= $ini
 
             UNION ALL
 
@@ -1742,12 +1776,13 @@ public class AppDatabase
             FROM GastosFijos g
             LEFT JOIN PagosMensuales p
                 ON p.FijoId=g.Id AND p.TipoFijo='Gasto' AND p.Anio=$a AND p.Mes=$m AND p.Dia=g.DiaVencimiento2 AND p.UsuarioId=$uid
-            WHERE g.Activo=1 AND g.DiaVencimiento2 > 0 AND g.UsuarioId=$uid
+            WHERE g.Activo=1 AND g.DiaVencimiento2 > 0 AND g.UsuarioId=$uid AND g.FechaInicio <= $ini
 
             ORDER BY Dia
             """;
         cmd.Parameters.AddWithValue("$a",   anio);
         cmd.Parameters.AddWithValue("$m",   mes);
+        cmd.Parameters.AddWithValue("$ini", InicioDeMes(new DateTime(anio, mes, 1)));
         cmd.Parameters.AddWithValue("$uid", usuarioId);
 
         var list = new List<GastoFijo>();
@@ -1763,7 +1798,9 @@ public class AppDatabase
                 Activo          = r.GetInt32(5) == 1,
                 PagadoEsteMes   = r.GetInt32(6) == 1,
                 PagoMensualId   = r.GetInt32(7),
-                MetodoPago      = r.IsDBNull(8) ? "" : r.GetString(8)
+                MetodoPago      = r.IsDBNull(8) ? "" : r.GetString(8),
+                Anio            = anio,
+                Mes             = mes
             });
         return list;
     }
@@ -1778,8 +1815,9 @@ public class AppDatabase
         var dia2 = g.DiaVencimiento2 == g.DiaVencimiento ? 0 : g.DiaVencimiento2;
 
         EjecutarNonQuery(conn,
-            "INSERT INTO GastosFijos (UsuarioId,Nombre,Monto,DiaVencimiento,DiaVencimiento2) VALUES ($uid,$n,$m,$d,$d2)",
-            ("$uid", usuarioId), ("$n", g.Nombre), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", dia2));
+            "INSERT INTO GastosFijos (UsuarioId,Nombre,Monto,DiaVencimiento,DiaVencimiento2,FechaInicio) VALUES ($uid,$n,$m,$d,$d2,$ini)",
+            ("$uid", usuarioId), ("$n", g.Nombre), ("$m", (double)g.Monto), ("$d", g.DiaVencimiento), ("$d2", dia2),
+            ("$ini", InicioDeMes(g.FechaInicio)));
     }
 
     /// <summary>La configuración de un gasto fijo (no su estado de un mes), para editarlo.</summary>
@@ -1787,7 +1825,7 @@ public class AppDatabase
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
-        cmd.CommandText = "SELECT Nombre, Monto, DiaVencimiento, DiaVencimiento2, Activo FROM GastosFijos WHERE Id=$id AND UsuarioId=$uid";
+        cmd.CommandText = "SELECT Nombre, Monto, DiaVencimiento, DiaVencimiento2, Activo, FechaInicio FROM GastosFijos WHERE Id=$id AND UsuarioId=$uid";
         cmd.Parameters.AddWithValue("$id", id);
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         using var r = cmd.ExecuteReader();
@@ -1795,7 +1833,8 @@ public class AppDatabase
         return new GastoFijo
         {
             Id = id, Nombre = r.GetString(0), Monto = (decimal)r.GetDouble(1),
-            DiaVencimiento = r.GetInt32(2), DiaVencimiento2 = r.GetInt32(3), Activo = r.GetInt32(4) == 1
+            DiaVencimiento = r.GetInt32(2), DiaVencimiento2 = r.GetInt32(3), Activo = r.GetInt32(4) == 1,
+            FechaInicio = DateTime.Parse(r.GetString(5))
         };
     }
 
@@ -2034,7 +2073,7 @@ public class AppDatabase
             FROM IngresosFijos i
             LEFT JOIN PagosMensuales p
                 ON p.FijoId=i.Id AND p.TipoFijo='Ingreso' AND p.Anio=$a AND p.Mes=$m AND p.Dia=i.DiaIngreso AND p.UsuarioId=$uid
-            WHERE i.Activo=1 AND i.UsuarioId=$uid
+            WHERE i.Activo=1 AND i.UsuarioId=$uid AND i.FechaInicio <= $ini
 
             UNION ALL
 
@@ -2043,12 +2082,13 @@ public class AppDatabase
             FROM IngresosFijos i
             LEFT JOIN PagosMensuales p
                 ON p.FijoId=i.Id AND p.TipoFijo='Ingreso' AND p.Anio=$a AND p.Mes=$m AND p.Dia=i.DiaIngreso2 AND p.UsuarioId=$uid
-            WHERE i.Activo=1 AND i.DiaIngreso2 > 0 AND i.UsuarioId=$uid
+            WHERE i.Activo=1 AND i.DiaIngreso2 > 0 AND i.UsuarioId=$uid AND i.FechaInicio <= $ini
 
             ORDER BY Dia
             """;
         cmd.Parameters.AddWithValue("$a",   anio);
         cmd.Parameters.AddWithValue("$m",   mes);
+        cmd.Parameters.AddWithValue("$ini", InicioDeMes(new DateTime(anio, mes, 1)));
         cmd.Parameters.AddWithValue("$uid", usuarioId);
 
         var list = new List<IngresoFijo>();
@@ -2076,10 +2116,11 @@ public class AppDatabase
         var dia2 = i.DiaIngreso2 == i.DiaIngreso ? 0 : i.DiaIngreso2;
 
         EjecutarNonQuery(conn,
-            "INSERT INTO IngresosFijos (UsuarioId,Nombre,Monto,DiaIngreso,DiaIngreso2,CuentaId) VALUES ($uid,$n,$m,$d,$d2,$cid)",
+            "INSERT INTO IngresosFijos (UsuarioId,Nombre,Monto,DiaIngreso,DiaIngreso2,CuentaId,FechaInicio) VALUES ($uid,$n,$m,$d,$d2,$cid,$ini)",
             ("$uid", usuarioId), ("$n", i.Nombre), ("$m", (double)i.Monto),
             ("$d", i.DiaIngreso), ("$d2", dia2),
-            ("$cid", i.CuentaId.HasValue ? i.CuentaId.Value : DBNull.Value));
+            ("$cid", i.CuentaId.HasValue ? i.CuentaId.Value : DBNull.Value),
+            ("$ini", InicioDeMes(i.FechaInicio)));
     }
 
     /// <summary>La configuración de un ingreso fijo (no su estado de un mes), para editarlo.</summary>
@@ -2087,7 +2128,7 @@ public class AppDatabase
     {
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
-        cmd.CommandText = "SELECT Nombre, Monto, DiaIngreso, DiaIngreso2, Activo, CuentaId FROM IngresosFijos WHERE Id=$id AND UsuarioId=$uid";
+        cmd.CommandText = "SELECT Nombre, Monto, DiaIngreso, DiaIngreso2, Activo, CuentaId, FechaInicio FROM IngresosFijos WHERE Id=$id AND UsuarioId=$uid";
         cmd.Parameters.AddWithValue("$id", id);
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         using var r = cmd.ExecuteReader();
@@ -2096,7 +2137,8 @@ public class AppDatabase
         {
             Id = id, Nombre = r.GetString(0), Monto = (decimal)r.GetDouble(1),
             DiaIngreso = r.GetInt32(2), DiaIngreso2 = r.GetInt32(3), Activo = r.GetInt32(4) == 1,
-            CuentaId = r.IsDBNull(5) ? null : r.GetInt32(5)
+            CuentaId = r.IsDBNull(5) ? null : r.GetInt32(5),
+            FechaInicio = DateTime.Parse(r.GetString(6))
         };
     }
 
@@ -2228,7 +2270,7 @@ public class AppDatabase
         c1.CommandText = $"""
             INSERT OR IGNORE INTO PagosMensuales (UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado)
             SELECT {usuarioId}, 'Gasto', Id, {anio}, {mes}, DiaVencimiento, 0
-            FROM GastosFijos WHERE Activo=1 AND UsuarioId={usuarioId}
+            FROM GastosFijos WHERE Activo=1 AND UsuarioId={usuarioId} AND FechaInicio <= '{InicioDeMes(new DateTime(anio, mes, 1))}'
             """;
         c1.ExecuteNonQuery();
 
@@ -2236,7 +2278,7 @@ public class AppDatabase
         c2.CommandText = $"""
             INSERT OR IGNORE INTO PagosMensuales (UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado)
             SELECT {usuarioId}, 'Gasto', Id, {anio}, {mes}, DiaVencimiento2, 0
-            FROM GastosFijos WHERE Activo=1 AND DiaVencimiento2 > 0 AND UsuarioId={usuarioId}
+            FROM GastosFijos WHERE Activo=1 AND DiaVencimiento2 > 0 AND UsuarioId={usuarioId} AND FechaInicio <= '{InicioDeMes(new DateTime(anio, mes, 1))}'
             """;
         c2.ExecuteNonQuery();
     }
@@ -2247,7 +2289,7 @@ public class AppDatabase
         c1.CommandText = $"""
             INSERT OR IGNORE INTO PagosMensuales (UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado)
             SELECT {usuarioId}, 'Ingreso', Id, {anio}, {mes}, DiaIngreso, 0
-            FROM IngresosFijos WHERE Activo=1 AND UsuarioId={usuarioId}
+            FROM IngresosFijos WHERE Activo=1 AND UsuarioId={usuarioId} AND FechaInicio <= '{InicioDeMes(new DateTime(anio, mes, 1))}'
             """;
         c1.ExecuteNonQuery();
 
@@ -2255,7 +2297,7 @@ public class AppDatabase
         c2.CommandText = $"""
             INSERT OR IGNORE INTO PagosMensuales (UsuarioId, TipoFijo, FijoId, Anio, Mes, Dia, Pagado)
             SELECT {usuarioId}, 'Ingreso', Id, {anio}, {mes}, DiaIngreso2, 0
-            FROM IngresosFijos WHERE Activo=1 AND DiaIngreso2 > 0 AND UsuarioId={usuarioId}
+            FROM IngresosFijos WHERE Activo=1 AND DiaIngreso2 > 0 AND UsuarioId={usuarioId} AND FechaInicio <= '{InicioDeMes(new DateTime(anio, mes, 1))}'
             """;
         c2.ExecuteNonQuery();
     }

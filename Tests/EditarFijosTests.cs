@@ -22,9 +22,17 @@ public class EditarFijosTests
         t.Db.ObtenerGastosFijosConEstado(anio, mes, t.UsuarioId);
     private static List<GastoFijo> GastosHoy(BaseDePrueba t) => Gastos(t, Hoy.Year, Hoy.Month);
 
+    /// <summary>
+    /// Desde hace tres meses: varias pruebas pagan meses anteriores, y un fijo no aparece en
+    /// los meses previos a su alta.
+    /// </summary>
     private static int CrearGasto(BaseDePrueba t, decimal monto, int dia, int dia2 = 0)
     {
-        t.Db.InsertarGastoFijo(new GastoFijo { Nombre = "Alquiler", Monto = monto, DiaVencimiento = dia, DiaVencimiento2 = dia2 }, t.UsuarioId);
+        t.Db.InsertarGastoFijo(new GastoFijo
+        {
+            Nombre = "Alquiler", Monto = monto, DiaVencimiento = dia, DiaVencimiento2 = dia2,
+            FechaInicio = Hoy.AddMonths(-3)
+        }, t.UsuarioId);
         return GastosHoy(t).First().Id;
     }
 

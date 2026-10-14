@@ -78,9 +78,23 @@ public class IngresosFijosViewModel : BaseViewModel
     public ObservableCollection<GrupoDia<IngresoFijo>> GruposIngresos     { get; } = [];
     public ObservableCollection<Cuenta>                CuentasDisponibles { get; } = [];
 
-    public int    Anio         { get; private set; }
-    public int    Mes          { get; private set; }
-    public string MesAnioTexto => $"Mes actual — {new DateTime(Anio, Mes, 1):MMMM yyyy}";
+    // ── Mes que se mira (ver GastosFijosViewModel) ───────────────────────────
+    private readonly MesNavegable _mes = new();
+
+    public int    Anio         => _mes.Anio;
+    public int    Mes          => _mes.Mes;
+    public string MesAnioTexto => _mes.Texto;
+    public Visibility VolverAlActualVisibility => _mes.VolverVisibility;
+
+    public ICommand MesAnteriorCommand  { get; }
+    public ICommand MesSiguienteCommand { get; }
+    public ICommand MesActualCommand    { get; }
+
+    private void IrA(Action mover)
+    {
+        mover();
+        Cargar();
+    }
 
     // ── Resumen ───────────────────────────────────────────────────────────────
     private decimal _totalPendiente;
@@ -105,6 +119,9 @@ public class IngresosFijosViewModel : BaseViewModel
         ToggleRecibidoCommand = new RelayCommand<IngresoFijo>(ToggleRecibido);
         EditarCommand       = new RelayCommand<IngresoFijo>(Editar);
         CancelarEdicionCommand = new RelayCommand(LimpiarFormulario);
+        MesAnteriorCommand  = new RelayCommand(() => IrA(_mes.Anterior));
+        MesSiguienteCommand = new RelayCommand(() => IrA(_mes.Siguiente));
+        MesActualCommand    = new RelayCommand(() => IrA(_mes.Actual));
         Cargar();
     }
 
@@ -112,9 +129,11 @@ public class IngresosFijosViewModel : BaseViewModel
 
     private void Cargar()
     {
-        var ahora = DateTime.Today;
-        Anio = ahora.Year;
-        Mes  = ahora.Month;
+        _mes.SeguirAlActual();
+        OnPropertyChanged(nameof(Anio));
+        OnPropertyChanged(nameof(Mes));
+        OnPropertyChanged(nameof(MesAnioTexto));
+        OnPropertyChanged(nameof(VolverAlActualVisibility));
 
         // Cargar cuentas disponibles
         var prevCuentaId = _cuentaSeleccionada?.Id;
@@ -185,7 +204,8 @@ public class IngresosFijosViewModel : BaseViewModel
             Monto       = montoDecimal,
             DiaIngreso  = dia,
             DiaIngreso2 = dia2,
-            CuentaId    = _cuentaSeleccionada?.Id
+            CuentaId    = _cuentaSeleccionada?.Id,
+            FechaInicio = _mes.Inicio   // existe desde el mes que se está mirando
         };
 
         try

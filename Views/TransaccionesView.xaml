@@ -256,7 +256,15 @@
                                         Binding="{Binding Categoria}" Width="110"/>
 
                     <DataGridTextColumn Header="DESCRIPCIÓN"
-                                        Binding="{Binding EtiquetaDisplay}" Width="*"/>
+                                        Binding="{Binding EtiquetaDisplay}" Width="*">
+                        <!-- La descripción va primero; las notas, al pasar el ratón. -->
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock"
+                                   BasedOn="{x:Static DataGridTextColumn.DefaultElementStyle}">
+                                <Setter Property="ToolTip" Value="{Binding NotasTooltip}"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
 
                     <DataGridTextColumn Header="CUENTA"
                                         Binding="{Binding CuentaNombre}" Width="120"/>

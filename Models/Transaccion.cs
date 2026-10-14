@@ -35,7 +35,20 @@ public class Transaccion
     /// </summary>
     public bool AfectaEfectivo => TarjetaCreditoId is null;
 
+    /// <summary>
+    /// Lo que identifica la transacción en las listas: la descripción, si no las notas, si no
+    /// la categoría.
+    /// <para>
+    /// Antes las notas iban primero. Las transacciones automáticas guardan el nombre en la
+    /// descripción y un texto fijo en las notas ("Ingreso fijo recibido", "Pago automático de
+    /// gasto fijo", "Abono registrado manualmente"), así que ese texto tapaba el nombre: no se
+    /// sabía qué ingreso fijo era ni qué tarjeta se había pagado.
+    /// </para>
+    /// </summary>
     public string EtiquetaDisplay =>
-        !string.IsNullOrWhiteSpace(Notas) ? Notas :
-        !string.IsNullOrWhiteSpace(Descripcion) ? Descripcion : Categoria;
+        !string.IsNullOrWhiteSpace(Descripcion) ? Descripcion :
+        !string.IsNullOrWhiteSpace(Notas)       ? Notas       : Categoria;
+
+    /// <summary>Las notas, para el tooltip; null si no hay (así no aparece un tooltip vacío).</summary>
+    public string? NotasTooltip => string.IsNullOrWhiteSpace(Notas) ? null : Notas;
 }
