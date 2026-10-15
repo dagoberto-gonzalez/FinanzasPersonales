@@ -244,7 +244,7 @@ public class Bloque2D1Tests
         vm.NuevoSaldoInicial = "1.250.000";   // con separador de miles, como se teclea
         vm.AgregarCommand.Execute(null);
 
-        var cuenta = Assert.Single(vm.Cuentas);
+        var cuenta = Assert.Single(vm.Cuentas, c => !c.EsEfectivo);   // la tabla también muestra el efectivo
         Assert.Equal(1250000m, cuenta.SaldoInicial);
         Assert.Equal(1250000m, cuenta.SaldoActual);
     }
@@ -262,7 +262,7 @@ public class Bloque2D1Tests
         }, t.UsuarioId);
 
         var vm = new ViewModels.CuentasViewModel(t.Db, t.UsuarioId);
-        vm.Seleccionada     = vm.Cuentas.Single();
+        vm.Seleccionada     = vm.Cuentas.Single(c => !c.EsEfectivo);
         Assert.Equal("100.000", vm.EditSaldoInicial);   // se precarga formateado
 
         vm.EditSaldoInicial = "200.000";
@@ -281,7 +281,7 @@ public class Bloque2D1Tests
         vm.NuevoSaldoInicial = "abc";
         vm.AgregarCommand.Execute(null);
 
-        Assert.Empty(vm.Cuentas);
+        Assert.DoesNotContain(vm.Cuentas, c => !c.EsEfectivo);
         Assert.Contains("Saldo inicial", vm.NuevaError);
     }
 }

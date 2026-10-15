@@ -310,7 +310,7 @@ public class MetasViewModel : BaseViewModel
         // sin su elemento seleccionado.
         Metas.Clear();
         CategoriasGasto.Clear();
-        foreach (var c in _db.ObtenerCategorias(_uid, Categoria.TipoGasto).Where(c => c != "Tarjeta"))
+        foreach (var c in _db.ObtenerCategorias(_uid, Categoria.TipoGasto).Where(c => !AppDatabase.EsCategoriaAutomatica(c)))
             CategoriasGasto.Add(c);
 
         foreach (var m in _db.ObtenerMetas(_uid))

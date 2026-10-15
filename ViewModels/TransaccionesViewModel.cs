@@ -323,7 +323,7 @@ public class TransaccionesViewModel : BaseViewModel
     {
         var tipo     = _esIngreso ? Models.Categoria.TipoIngreso : Models.Categoria.TipoGasto;
         var objetivo = _categorias
-            .Where(c => c.Nombre != "Tarjeta" && c.SirvePara(tipo))
+            .Where(c => !AppDatabase.EsCategoriaAutomatica(c.Nombre) && c.SirvePara(tipo))
             .Select(c => c.Nombre)
             .ToList();
         var orden = _categorias.Select((c, i) => (c.Nombre, i))
@@ -498,7 +498,8 @@ public class TransaccionesViewModel : BaseViewModel
     {
         if (t is null) return;
         var res = System.Windows.MessageBox.Show(
-            $"¿Eliminar la transacción \"{t.EtiquetaDisplay}\" por ₡{t.Monto:N0}?",
+            $"¿Eliminar la transacción \"{t.EtiquetaDisplay}\" por ₡{t.Monto:N0}?" +
+            (t.EsTransferencia ? "\n\nEs una transferencia: se borran la salida y la entrada." : ""),
             "Confirmar eliminación",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning);

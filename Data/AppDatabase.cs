@@ -200,6 +200,12 @@ public class AppDatabase
         MigrarInicioDeFijos(conn);
         MigrarPresupuestoPorUsuario(conn);
         MigrarMetasAApartados(conn);
+        if (!GetColumnas(conn, "Transacciones").Contains("TransferenciaId"))
+        {
+            // Las dos mitades de una transferencia comparten este número (ver Transferir).
+            AddColumna(conn, "Transacciones", "TransferenciaId", "INTEGER");
+            EjecutarNonQuery(conn, "CREATE INDEX IF NOT EXISTS IX_Transacciones_TransferenciaId ON Transacciones(TransferenciaId)");
+        }
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -681,7 +687,7 @@ public class AppDatabase
     private static string TipoDeFabrica(string nombre) => nombre switch
     {
         "Salario" or "Ingresos Fijos" => Categoria.TipoIngreso,
-        "Otros"                       => Categoria.TipoAmbos,
+        "Otros" or "Transferencia"    => Categoria.TipoAmbos,
         _                             => Categoria.TipoGasto
     };
 
@@ -1241,7 +1247,14 @@ public class AppDatabase
     /// escribiendo el nombre viejo y las transacciones quedarían descolgadas del filtro.
     /// </summary>
     public static readonly string[] CategoriasSistema =
-        ["Gastos Fijos", "Ingresos Fijos", "Salario", "Tarjeta"];
+        ["Gastos Fijos", "Ingresos Fijos", "Salario", "Tarjeta", "Transferencia"];
+
+    /// <summary>
+    /// Categorías que sólo pone la aplicación y no se ofrecen en ningún formulario: marcan
+    /// movimientos que no son gasto ni ingreso (pagar la tarjeta, mover dinero entre cuentas) y
+    /// que se registran desde su propia pantalla, que sabe enlazarlos.
+    /// </summary>
+    public static bool EsCategoriaAutomatica(string nombre) => nombre is "Tarjeta" or "Transferencia";
 
     public static bool EsCategoriaSistema(string nombre) =>
         CategoriasSistema.Contains(nombre, StringComparer.OrdinalIgnoreCase);
@@ -1425,6 +1438,69 @@ public class AppDatabase
     }
 
     /// <summary>
+    /// Pasa dinero de una cuenta a otra, o entre una cuenta y el efectivo (<c>null</c>). Son dos
+    /// movimientos enlazados por <c>TransferenciaId</c>: la salida del origen y la entrada al
+    /// destino.
+    /// <para>
+    /// Antes había que registrar un gasto en una cuenta y un ingreso en la otra, y los dos
+    /// contaban en reportes y presupuesto como si se hubiera gastado y ganado ese dinero. Ahora
+    /// quedan fuera del eje presupuesto (<see cref="Transaccion.AfectaPresupuesto"/>); en el eje
+    /// efectivo se compensan, así que el Disponible no cambia: el dinero sólo cambió de lugar.
+    /// </para>
+    /// <para>
+    /// Si el origen tiene dinero apartado en metas (D5), sólo se puede transferir lo libre: si
+    /// no, las metas prometerían dinero que se fue.
+    /// </para>
+    /// </summary>
+    /// <returns>El <c>TransferenciaId</c> que comparten las dos mitades.</returns>
+    public int Transferir(int? origenId, int? destinoId, decimal monto, DateTime fecha, string nota, int usuarioId)
+    {
+        if (monto <= 0)
+            throw new ArgumentException("El monto tiene que ser mayor que cero.");
+        if (origenId == destinoId)
+            throw new ArgumentException("El origen y el destino son el mismo.");
+
+        var cuentas = ObtenerCuentas(usuarioId);
+        Cuenta? Buscar(int? id) => id is null ? null
+            : cuentas.FirstOrDefault(c => c.Id == id) ?? throw new InvalidOperationException("Esa cuenta no existe.");
+        var origen  = Buscar(origenId);
+        var destino = Buscar(destinoId);
+
+        if (origen is { Apartado: > 0 } && monto > origen.Libre)
+            throw new InvalidOperationException(
+                $"En «{origen.Nombre}» hay ₡{origen.Apartado:N0} apartados en metas y sólo ₡{Math.Max(origen.Libre, 0):N0} libres. " +
+                "Libera dinero de alguna meta si quieres transferir más.");
+
+        string nombreOrigen = origen?.Nombre ?? "Efectivo", nombreDestino = destino?.Nombre ?? "Efectivo";
+
+        using var conn = Abrir();
+        using var tr   = conn.BeginTransaction();
+        try
+        {
+            long Insertar(string tipo, Cuenta? cuenta, string descripcion) => EjecutarScalar<long>(conn,
+                """
+                INSERT INTO Transacciones (UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId)
+                VALUES ($uid, $tipo, $m, 'Transferencia', $desc, $f, $notas, $cn, $cid);
+                SELECT last_insert_rowid();
+                """,
+                ("$uid", usuarioId), ("$tipo", tipo), ("$m", (double)monto), ("$desc", descripcion),
+                ("$f", fecha.ToString("yyyy-MM-dd")), ("$notas", nota?.Trim() ?? ""),
+                ("$cn", cuenta?.Nombre ?? "Efectivo"),
+                ("$cid", cuenta?.Id));
+
+            var salida  = Insertar("Gasto",   origen,  $"Transferencia a {nombreDestino}");
+            var entrada = Insertar("Ingreso", destino, $"Transferencia desde {nombreOrigen}");
+
+            // Las dos mitades llevan el Id de la salida como número de transferencia.
+            EjecutarNonQuery(conn, "UPDATE Transacciones SET TransferenciaId=$g WHERE Id IN ($a, $b)",
+                ("$g", salida), ("$a", salida), ("$b", entrada));
+            tr.Commit();
+            return (int)salida;
+        }
+        catch { tr.Rollback(); throw; }
+    }
+
+    /// <summary>
     /// Por qué una transacción no se puede editar desde la pantalla Transacciones, o null si se
     /// puede. Las que generan otras pantallas y guardan su propia copia de los datos se
     /// gestionan allí: editarlas aquí dejaría las dos versiones distintas.
@@ -1449,6 +1525,12 @@ public class AppDatabase
                 ("$id", transaccionId)) > 0)
             return "Es un ingreso de Control Laboral, que guarda su propio monto: se gestiona " +
                    "desde el historial de Control Laboral.";
+
+        if (EjecutarScalar<long>(conn,
+                "SELECT COUNT(*) FROM Transacciones WHERE Id=$id AND TransferenciaId IS NOT NULL",
+                ("$id", transaccionId)) > 0)
+            return "Es una transferencia entre cuentas: editar una mitad descuadraría la otra. " +
+                   "Bórrala (se borran las dos) y vuelve a hacerla desde Cuentas.";
 
         // Su monto también descontó lo apartado en la meta: editarlo aquí dejaría la meta
         // descuadrada. Borrarlo sí se puede: el movimiento se va con él y el dinero vuelve a
@@ -1517,6 +1599,13 @@ public class AppDatabase
         // decir qué tarjeta salda. Si no, se contaría como un gasto nuevo además de la compra
         // que ya se registró: el mismo dinero dos veces. Los pagos se registran en la pantalla
         // de Tarjetas, que es la única que conoce el saldo pendiente.
+        // Igual que «Tarjeta»: una transferencia son DOS movimientos enlazados (sale de una
+        // cuenta, entra en otra). Escrita a mano sería sólo la mitad, y contaría como gasto.
+        if (t.Categoria == "Transferencia")
+            throw new ArgumentException(
+                "Las transferencias entre cuentas se hacen desde la pantalla Cuentas, para que " +
+                "salgan de una cuenta y entren en la otra a la vez.", nameof(t));
+
         if (t.Categoria == "Tarjeta" && !t.PagoDeTarjetaId.HasValue)
             throw new ArgumentException(
                 "Los pagos de tarjeta se registran desde la pantalla Tarjetas, para que se " +
@@ -1528,7 +1617,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId " +
+            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId,TransferenciaId " +
             "FROM Transacciones WHERE UsuarioId=$uid ORDER BY Fecha DESC, Id DESC";
         cmd.Parameters.AddWithValue("$uid", usuarioId);
         var list = new List<Transaccion>();
@@ -1542,7 +1631,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText =
-            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId " +
+            "SELECT Id,Tipo,Monto,Categoria,Descripcion,Fecha,Notas,CuentaNombre,TarjetaCreditoId,CuentaId,PagoDeTarjetaId,TransferenciaId " +
             "FROM Transacciones WHERE TarjetaCreditoId=$id ORDER BY Fecha DESC";
         cmd.Parameters.AddWithValue("$id", tarjetaId);
         var list = new List<Transaccion>();
@@ -1569,7 +1658,14 @@ public class AppDatabase
                 "UPDATE PagosMensuales SET Pagado=0, MetodoPago='', TransaccionId=NULL WHERE TransaccionId=$id",
                 ("$id", id));
 
-            EjecutarNonQuery(conn, "DELETE FROM Transacciones WHERE Id=$id", ("$id", id));
+            // Una transferencia se borra entera: dejar sólo la salida sería un gasto que no
+            // existió, y dejar sólo la entrada, dinero aparecido de la nada.
+            EjecutarNonQuery(conn,
+                """
+                DELETE FROM Transacciones
+                WHERE Id=$id
+                   OR TransferenciaId = (SELECT TransferenciaId FROM Transacciones WHERE Id=$id)
+                """, ("$id", id));
             tr.Commit();
         }
         catch { tr.Rollback(); throw; }
@@ -1587,7 +1683,8 @@ public class AppDatabase
         CuentaNombre     = r.IsDBNull(7) ? "Efectivo" : r.GetString(7),
         TarjetaCreditoId = r.IsDBNull(8) ? null : r.GetInt32(8),
         CuentaId         = r.IsDBNull(9) ? null : r.GetInt32(9),
-        PagoDeTarjetaId  = r.IsDBNull(10) ? null : r.GetInt32(10)
+        PagoDeTarjetaId  = r.IsDBNull(10) ? null : r.GetInt32(10),
+        TransferenciaId  = r.IsDBNull(11) ? null : r.GetInt32(11)
     };
 
     // ── Metas de Ahorro ───────────────────────────────────────────────────────
@@ -1932,6 +2029,24 @@ public class AppDatabase
                 Apartado     = (decimal)r.GetDouble(7)
             });
         return list;
+    }
+
+    /// <summary>
+    /// El efectivo: los movimientos del eje efectivo que no pasan por ninguna cuenta (pagos en
+    /// efectivo, y transferencias desde o hacia "Efectivo"). Lo usan el Dashboard y la fila
+    /// "Efectivo" de Cuentas, así que no pueden dar cifras distintas.
+    /// </summary>
+    public decimal ObtenerSaldoEfectivo(int usuarioId)
+    {
+        using var conn = Abrir();
+        return (decimal)EjecutarScalar<double>(conn,
+            """
+            SELECT COALESCE(SUM(CASE WHEN Tipo='Ingreso' THEN Monto ELSE -Monto END), 0)
+            FROM Transacciones
+            WHERE UsuarioId = $uid
+              AND CuentaId IS NULL
+              AND TarjetaCreditoId IS NULL   -- eje efectivo: una compra con tarjeta no saca efectivo
+            """, ("$uid", usuarioId));
     }
 
     public void InsertarCuenta(Cuenta c, int usuarioId)
@@ -2555,7 +2670,7 @@ public class AppDatabase
                    SUM(CASE WHEN Tipo='Gasto'   THEN Monto ELSE 0 END) AS Gastos
             FROM Transacciones
             WHERE Fecha >= $desde AND UsuarioId = $uid
-              AND PagoDeTarjetaId IS NULL   -- eje presupuesto: en qué se gastó
+              AND PagoDeTarjetaId IS NULL AND TransferenciaId IS NULL   -- eje presupuesto: en qué se gastó
             GROUP BY Periodo
             ORDER BY Periodo
             """;
@@ -3002,7 +3117,7 @@ public class AppDatabase
             SELECT Tipo, SUM(Monto), COUNT(*)
             FROM Transacciones
             WHERE UsuarioId=$uid
-              AND PagoDeTarjetaId IS NULL   -- eje presupuesto: qué se ganó y en qué se gastó
+              AND PagoDeTarjetaId IS NULL AND TransferenciaId IS NULL   -- eje presupuesto: qué se ganó y en qué se gastó
               AND Fecha >= $desde AND Fecha <= $hasta
             GROUP BY Tipo
             """;
@@ -3038,7 +3153,7 @@ public class AppDatabase
                 SELECT Tipo, SUM(Monto), COUNT(*)
                 FROM Transacciones
                 WHERE UsuarioId=$uid
-                  AND PagoDeTarjetaId IS NULL   -- eje presupuesto
+                  AND PagoDeTarjetaId IS NULL AND TransferenciaId IS NULL   -- eje presupuesto
                   AND Fecha >= $desde AND Fecha <= $hasta
                 GROUP BY Tipo
                 """;
@@ -3525,6 +3640,20 @@ public class AppDatabase
             "Ingresos registrados con una tarjeta de crédito como origen.",
             "No suman en ningún total: quedan fuera del balance, los reportes y el cierre de mes.");
 
+        // Una transferencia son exactamente dos mitades del mismo monto: una salida y una
+        // entrada. Si falta una, el dinero desaparece o aparece de la nada en el Disponible.
+        Contar("""
+            SELECT COUNT(*) FROM (
+                SELECT TransferenciaId FROM Transacciones WHERE TransferenciaId IS NOT NULL
+                GROUP BY TransferenciaId
+                HAVING COUNT(*) <> 2
+                    OR SUM(Tipo = 'Gasto') <> 1
+                    OR MIN(Monto) <> MAX(Monto))
+            """,
+            SeveridadProblema.Critico, "Transacciones",
+            "Transferencias incompletas o descuadradas.",
+            "Les falta la salida o la entrada, o sus montos no coinciden: el Disponible queda mal.");
+
         Contar("SELECT COUNT(*) FROM Transacciones WHERE Monto <= 0",
             SeveridadProblema.Advertencia, "Transacciones",
             "Transacciones con importe cero o negativo.");
@@ -3576,7 +3705,7 @@ public class AppDatabase
                 // comprobación reportaría desfases que no existen.
                 decimal Total(string tipo) => (decimal)EjecutarScalar<double>(conn,
                     "SELECT COALESCE(SUM(Monto),0) FROM Transacciones " +
-                    "WHERE UsuarioId=$uid AND PagoDeTarjetaId IS NULL AND Tipo=$tipo " +
+                    "WHERE UsuarioId=$uid AND PagoDeTarjetaId IS NULL AND TransferenciaId IS NULL AND Tipo=$tipo " +
                     "AND Fecha >= $desde AND Fecha <= $hasta",
                     ("$uid", c.Uid), ("$tipo", tipo),
                     ("$desde", desde.ToString("yyyy-MM-dd")), ("$hasta", hasta.ToString("yyyy-MM-dd")));

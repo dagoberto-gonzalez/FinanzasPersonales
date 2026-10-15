@@ -31,6 +31,18 @@ public class Cuenta
     public string ApartadoDisplay => Apartado > 0 ? $"₡{Apartado:N0}" : "—";
     public string LibreDisplay    => $"₡{Libre:N0}";
 
+    /// <summary>
+    /// La fila "Efectivo" de la pantalla Cuentas: no es una cuenta guardada (Id 0), sino lo que
+    /// queda de los movimientos sin cuenta. Se muestra junto a las cuentas para ver todo el dinero
+    /// en un sitio, pero no se edita ni se borra.
+    /// </summary>
+    public bool EsEfectivo { get; private init; }
+
+    public static Cuenta Efectivo(decimal saldo) => new()
+    {
+        Nombre = "Efectivo", Tipo = "Efectivo", SaldoActual = saldo, EsEfectivo = true
+    };
+
     public string EstadoTexto  => Activa ? "Activa" : "Inactiva";
     public string BancoDisplay => string.IsNullOrWhiteSpace(Banco) ? "—" : Banco;
     public string SaldoDisplay => $"₡{SaldoActual:N0}";

@@ -27,6 +27,8 @@ public class CuentasViewModel : BaseViewModel
         get => _seleccionada;
         set
         {
+            // La fila Efectivo no es una cuenta: no abre el panel de edición.
+            if (value is { EsEfectivo: true }) value = null;
             _seleccionada = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(HaySeleccion));
@@ -130,6 +132,104 @@ public class CuentasViewModel : BaseViewModel
     public Visibility NuevaErrorVisibility =>
         string.IsNullOrEmpty(_nuevaError) ? Visibility.Collapsed : Visibility.Visible;
 
+    // ── Transferir ────────────────────────────────────────────────────────────
+    // Antes, pasar dinero de una cuenta a otra obligaba a registrar un gasto y un ingreso, y los
+    // dos contaban en reportes y presupuesto como dinero gastado y ganado.
+
+    /// <summary>Origen o destino de una transferencia: una cuenta, o el efectivo (Id null).</summary>
+    public sealed record OpcionCuenta(int? Id, string Nombre)
+    {
+        public override string ToString() => Nombre;
+    }
+
+    public ObservableCollection<OpcionCuenta> OpcionesTransferencia { get; } = [];
+
+    private OpcionCuenta? _transOrigen;
+    private OpcionCuenta? _transDestino;
+    private string   _transMonto = string.Empty;
+    private DateTime _transFecha = DateTime.Today;
+    private string   _transNota  = string.Empty;
+    private string   _transError = string.Empty;
+
+    public OpcionCuenta? TransOrigen
+    {
+        get => _transOrigen;
+        set { _transOrigen = value; OnPropertyChanged(); }
+    }
+    public OpcionCuenta? TransDestino
+    {
+        get => _transDestino;
+        set { _transDestino = value; OnPropertyChanged(); }
+    }
+    public string TransMonto
+    {
+        get => _transMonto;
+        set { _transMonto = value; OnPropertyChanged(); }
+    }
+    public DateTime TransFecha
+    {
+        get => _transFecha;
+        set { _transFecha = value; OnPropertyChanged(); }
+    }
+    public string TransNota
+    {
+        get => _transNota;
+        set { _transNota = value; OnPropertyChanged(); }
+    }
+    public string TransError
+    {
+        get => _transError;
+        set { _transError = value; OnPropertyChanged(); OnPropertyChanged(nameof(TransErrorVisibility)); }
+    }
+    public Visibility TransErrorVisibility =>
+        string.IsNullOrEmpty(_transError) ? Visibility.Collapsed : Visibility.Visible;
+
+    // Propio, no MensajeOk: aquél vive en el panel de edición, que sólo se ve con una cuenta
+    // seleccionada, y la confirmación de la transferencia no aparecería.
+    private string _transOk = string.Empty;
+    public string TransOk
+    {
+        get => _transOk;
+        set { _transOk = value; OnPropertyChanged(); OnPropertyChanged(nameof(TransOkVisibility)); }
+    }
+    public Visibility TransOkVisibility =>
+        string.IsNullOrEmpty(_transOk) ? Visibility.Collapsed : Visibility.Visible;
+
+    public ICommand TransferirCommand { get; }
+
+    private void Transferir()
+    {
+        TransError = string.Empty;
+        TransOk    = string.Empty;
+
+        if (_transOrigen is null || _transDestino is null)
+        {
+            TransError = "Elige de dónde sale y a dónde va el dinero.";
+            return;
+        }
+        if (!Dinero.TryParsePositivo(_transMonto, out var monto))
+        {
+            TransError = "Escribe un monto mayor que cero.";
+            return;
+        }
+
+        try
+        {
+            _db.Transferir(_transOrigen.Id, _transDestino.Id, monto, _transFecha, _transNota, _uid);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            TransError = ex.Message;
+            return;
+        }
+
+        TransOk    = $"Transferidos ₡{monto:N0} de {_transOrigen.Nombre} a {_transDestino.Nombre}.";
+        TransMonto = string.Empty;
+        TransNota  = string.Empty;
+        TransFecha = DateTime.Today;
+        Cargar();
+    }
+
     // ── Colecciones ───────────────────────────────────────────────────────────
     public ObservableCollection<Cuenta> Cuentas { get; } = [];
 
@@ -148,6 +248,7 @@ public class CuentasViewModel : BaseViewModel
         AgregarCommand        = new RelayCommand(Agregar);
         GuardarCambiosCommand = new RelayCommand(GuardarCambios);
         EliminarCommand       = new RelayCommand(Eliminar);
+        TransferirCommand     = new RelayCommand(Transferir);
         Cargar();
     }
 
@@ -159,9 +260,22 @@ public class CuentasViewModel : BaseViewModel
         Cuentas.Clear();
         foreach (var c in _db.ObtenerCuentas(_uid))
             Cuentas.Add(c);
+        // El efectivo al final, para ver todo el dinero en un sitio. De paso, ocupar el nombre
+        // impide crear una cuenta llamada "Efectivo" (saldrían dos en las transferencias).
+        Cuentas.Add(Cuenta.Efectivo(_db.ObtenerSaldoEfectivo(_uid)));
 
         if (prevId.HasValue)
             Seleccionada = Cuentas.FirstOrDefault(c => c.Id == prevId);
+
+        // Origen y destino: el efectivo y las cuentas activas. Son records, así que después de
+        // reconstruir la lista la opción elegida sigue siendo igual a una de las nuevas.
+        var (origen, destino) = (_transOrigen, _transDestino);
+        OpcionesTransferencia.Clear();
+        OpcionesTransferencia.Add(new OpcionCuenta(null, "Efectivo"));
+        foreach (var c in Cuentas.Where(c => c.Activa && !c.EsEfectivo))
+            OpcionesTransferencia.Add(new OpcionCuenta(c.Id, c.Nombre));
+        TransOrigen  = OpcionesTransferencia.FirstOrDefault(o => o == origen);
+        TransDestino = OpcionesTransferencia.FirstOrDefault(o => o == destino);
     }
 
     private void Agregar()

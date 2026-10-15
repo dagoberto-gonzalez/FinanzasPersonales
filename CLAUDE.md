@@ -86,7 +86,7 @@ connection per operation (no connection pooling / EF Core) and runs idempotent
 
 - `Configuracion (Clave, Valor)` — seeded with `moneda='₡'`, `max_usuarios`. The monthly budget used to live here as one global key; it is now per user
 - `Usuarios (Id, NombreUsuario, PasswordHash, Rol, Activo, FechaCreacion, PresupuestoMensual)` — Rol: "Admin"|"Normal". `PresupuestoMensual` (0 = none) drives the Dashboard budget card and alert, measured on the `AfectaPresupuesto` axis; edited on the card itself. See "Accounts and passwords" below
-- `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId, PagoDeTarjetaId)` — the last two are the D2 axes
+- `Transacciones (Id, UsuarioId, Tipo, Monto, Categoria, Descripcion, Fecha, Notas, CuentaNombre, CuentaId, TarjetaCreditoId, PagoDeTarjetaId, TransferenciaId)` — `TarjetaCreditoId` / `PagoDeTarjetaId` are the D2 axes; `TransferenciaId` links the two halves of a transfer (see below)
 - `MetasAhorro (Id, UsuarioId, Nombre, MontoObjetivo, MontoActual, FechaLimite, CuentaId)` + `MovimientosMeta (Id, MetaId → CASCADE, Fecha, Monto, Tipo, TransaccionId → CASCADE)` — **decision D5: a goal is an earmark ("bolsillo") inside an account.** Its reserved amount is `Σ MovimientosMeta`, never stored. *Apartar* reserves without moving money (only `Cuenta.Libre = SaldoActual − Apartado` changes, and it cannot exceed what is free); *Usar* inserts a real expense from the goal's account plus a negative movement linked to it, in one transaction (deleting that expense cascades the movement back; editing it is refused); *Liberar* un-reserves without spending. `MontoActual` is now only the pre-D5 counter of goals without an account, turned into an initial earmark when their owner picks one (`AsignarCuentaAMeta`)
 - `Cuentas (Id, UsuarioId, Nombre, Tipo, Banco, Activa, SaldoInicial)` — UNIQUE(UsuarioId, Nombre). There is **no stored current balance**: see "Derived balances" below
 - `TarjetasCredito (Id, UsuarioId, Nombre, LimiteCredito, DiaCierre, DiaPago)` — UNIQUE(UsuarioId, Nombre). No stored balance: see "Derived balances"
@@ -105,8 +105,9 @@ single figure was the source of the inconsistencies between screens. `Transaccio
 | Cash / debit purchase | yes | yes |
 | **Credit card purchase** (`TarjetaCreditoId`) | **yes** | no |
 | **Card payment** (`PagoDeTarjetaId`) | no | **yes** |
+| **Transfer** (`TransferenciaId`, two halves) | no | **yes** (the halves cancel out) |
 
-- **`AfectaPresupuesto`** (`PagoDeTarjetaId IS NULL`) drives categories, the budget alert,
+- **`AfectaPresupuesto`** (`PagoDeTarjetaId IS NULL AND TransferenciaId IS NULL`) drives categories, the budget alert,
   monthly/annual reports, `CerrarMes`, and the PDF. A card payment is not a new expense — it was
   already counted at purchase, and counting it again would double it.
 - **`AfectaEfectivo`** (`TarjetaCreditoId IS NULL`) drives account balances and the dashboard's
@@ -119,6 +120,15 @@ inserting (`ValidarTransaccion`) — balances follow on their own. Two kinds are
 `MotivoNoEditable`: card payments (`PagoDeTarjetaId`, owned by the Tarjetas screen) and Control
 Laboral income (`IngresoLaboralDirecto`/`PeriodosLaborales` keep their own copy of the amount).
 A fixed item's payment *is* editable: `PagosMensuales` stores no amount, it reads the transaction's.
+
+**Transfers** (`AppDatabase.Transferir`) move money between accounts, or between an account and
+cash (`null`): a `Gasto` from the origin and an `Ingreso` into the destination, category
+`Transferencia`, sharing `TransferenciaId`. They are off the budget axis, and on the cash axis
+they cancel out, so *Disponible* does not move. Deleting either half deletes both; editing is
+refused; `InsertarTransaccion` rejects the category so a lone half cannot be typed in. Only the
+free part of an account with goal earmarks can be transferred. `EsCategoriaAutomatica` keeps
+`Tarjeta` and `Transferencia` out of every form. Cash shows as a read-only "Efectivo" row in
+Cuentas (`ObtenerSaldoEfectivo`, the same figure the Dashboard uses).
 
 Whenever you sum transactions, **say which axis you mean** — never filter on `TarjetaCreditoId`
 by hand for a "totals" query. A row may not be both a card purchase and a card payment;

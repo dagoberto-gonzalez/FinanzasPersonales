@@ -295,8 +295,7 @@ public class DashboardViewModel : BaseViewModel
         // pantalla Cuentas no pueden dar cifras distintas.
         var cuentas = _db.ObtenerCuentas(_uid);
         _enCuentas  = cuentas.Sum(c => c.SaldoActual);
-        _enEfectivo = efectivoTodas.Where(t => t.CuentaId is null)
-                                   .Sum(t => t.Tipo == "Ingreso" ? t.Monto : -t.Monto);
+        _enEfectivo = _db.ObtenerSaldoEfectivo(_uid);   // la misma cifra que la fila Efectivo de Cuentas
         BalanceTotal = _enCuentas + _enEfectivo;
         OnPropertyChanged(nameof(DesgloseDisponibleTexto));
 
