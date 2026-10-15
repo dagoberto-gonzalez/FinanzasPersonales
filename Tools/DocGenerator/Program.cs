@@ -256,12 +256,12 @@ P(body, "");
 // ── 7. Tema visual ────────────────────────────────────────────────────────────
 H2(body, "7. Tema visual (paleta de colores)");
 P(body, "Toda la aplicación usa un tema oscuro definido en App.xaml. Los colores principales son:");
-Bullet(body, "BgBrush (#1E1E2E) — fondo de la ventana principal.");
-Bullet(body, "SurfaceBrush (#24273A) — barra lateral y campos de texto.");
-Bullet(body, "CardBrush (#2A2D3E) — tarjetas de contenido.");
-Bullet(body, "AccentBrush (#7C3AED) — botones primarios y elementos destacados (violeta).");
-Bullet(body, "GreenBrush (#A6E3A1) — ingresos, montos positivos, estados \"pagado\".");
-Bullet(body, "RedBrush (#F38BA8) — gastos, montos negativos, alertas de error.");
+Bullet(body, "BgBrush (#0F172A) — fondo de la ventana principal.");
+Bullet(body, "SurfaceBrush (#172033) — barra lateral y campos de texto.");
+Bullet(body, "CardBrush (#1E293B) — tarjetas de contenido.");
+Bullet(body, "AccentBrush (#0EA5E9) — botones primarios y elementos destacados (azul cielo, paleta Océano).");
+Bullet(body, "GreenBrush (#4ADE80) — ingresos, montos positivos, estados \"pagado\".");
+Bullet(body, "RedBrush (#FB7185) — gastos, montos negativos, alertas de error.");
 Bullet(body, "YellowBrush — alertas de vencimiento próximo.");
 P(body, "Los estilos de botones (PrimaryButton, DangerButton), inputs (TextBox, ComboBox) " +
         "y DataGrid están todos definidos como recursos globales en App.xaml, lo que " +

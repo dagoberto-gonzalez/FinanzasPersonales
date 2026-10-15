@@ -31,7 +31,7 @@ public class CambiarPasswordViewModel : BaseViewModel
     public Visibility MensajeVisibility =>
         string.IsNullOrEmpty(_mensaje) ? Visibility.Collapsed : Visibility.Visible;
 
-    public string MensajeColor => _esExito ? "#A6E3A1" : "#F38BA8";
+    public string MensajeColor => _esExito ? Temas.Actual.Green : Temas.Actual.Red;
 
     public ICommand CambiarCommand { get; }
 

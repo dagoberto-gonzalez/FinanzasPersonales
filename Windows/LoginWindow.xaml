@@ -3,17 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="DMT Finance — Iniciar Sesión"
         Icon="/Assets/dmt-logo.png"
-        Width="440" Height="620"
+        Width="440" SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
-        Background="#1E1E2E">
+        Background="{DynamicResource BgBrush}">
 
-    <Grid>
+    <Grid Margin="0,24">
         <Border HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Width="360"
-                Background="#24273A"
-                BorderBrush="#3A3D52"
+                Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="16"
                 Padding="36,40">
@@ -22,7 +22,7 @@
                 <!-- Logo DMT Finance -->
                 <Viewbox Width="64" Height="64" HorizontalAlignment="Center">
                     <Canvas Width="64" Height="64">
-                        <Rectangle Width="64" Height="64" RadiusX="14" RadiusY="14" Fill="#7C3AED"/>
+                        <Rectangle Width="64" Height="64" RadiusX="14" RadiusY="14" Fill="#0EA5E9"/>
                         <Rectangle Canvas.Left="9"  Canvas.Top="43" Width="13" Height="12" RadiusX="2.5" RadiusY="2.5" Fill="#66FFFFFF"/>
                         <Rectangle Canvas.Left="26" Canvas.Top="31" Width="13" Height="24" RadiusX="2.5" RadiusY="2.5" Fill="#A6FFFFFF"/>
                         <Rectangle Canvas.Left="43" Canvas.Top="17" Width="13" Height="38" RadiusX="2.5" RadiusY="2.5" Fill="White"/>
@@ -36,26 +36,26 @@
                 <TextBlock Text="DMT Finance"
                            FontSize="24"
                            FontWeight="Bold"
-                           Foreground="#CDD6F4"
+                           Foreground="{DynamicResource TextBrush}"
                            HorizontalAlignment="Center"
                            Margin="0,10,0,4"/>
                 <TextBlock Text="Inicia sesión para continuar"
                            FontSize="13"
-                           Foreground="#6C7086"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,32"/>
 
                 <!-- Instalación nueva: ya no se crea sola una cuenta "Admin" con contraseña
                      conocida, así que hay que decir por dónde se empieza. -->
-                <Border Background="#7C3AED22" CornerRadius="8" Padding="12,10" Margin="0,-16,0,20"
+                <Border Background="{DynamicResource AccentTintBrush}" CornerRadius="8" Padding="12,10" Margin="0,-16,0,20"
                         Visibility="{Binding SinCuentasVisibility}">
                     <TextBlock Text="Aún no hay cuentas. Pulsa «Crear cuenta nueva»: la primera será la administradora."
-                               FontSize="12" Foreground="#CDD6F4" TextWrapping="Wrap"/>
+                               FontSize="12" Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap"/>
                 </Border>
 
                 <!-- Usuario -->
                 <TextBlock Text="Usuario"
-                           Foreground="#6C7086"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            FontSize="12"
                            Margin="0,0,0,6"/>
                 <TextBox x:Name="TxtUsuario"
@@ -66,7 +66,7 @@
 
                 <!-- Contraseña -->
                 <TextBlock Text="Contraseña"
-                           Foreground="#6C7086"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            FontSize="12"
                            Margin="0,0,0,6"/>
                 <PasswordBox x:Name="PwdPassword"
@@ -76,7 +76,7 @@
 
                 <!-- Error -->
                 <TextBlock Text="{Binding MensajeError}"
-                           Foreground="#F38BA8"
+                           Foreground="{DynamicResource RedBrush}"
                            FontSize="12"
                            TextWrapping="Wrap"
                            Margin="0,0,0,20"
@@ -97,9 +97,9 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Separator Grid.Column="0" VerticalAlignment="Center" Background="#3A3D52"/>
-                    <TextBlock Grid.Column="1" Text=" o " Foreground="#6C7086" FontSize="12" Margin="6,0"/>
-                    <Separator Grid.Column="2" VerticalAlignment="Center" Background="#3A3D52"/>
+                    <Separator Grid.Column="0" VerticalAlignment="Center" Background="{DynamicResource BorderBrush}"/>
+                    <TextBlock Grid.Column="1" Text=" o " Foreground="{DynamicResource TextMutedBrush}" FontSize="12" Margin="6,0"/>
+                    <Separator Grid.Column="2" VerticalAlignment="Center" Background="{DynamicResource BorderBrush}"/>
                 </Grid>
 
                 <!-- Botón crear cuenta -->

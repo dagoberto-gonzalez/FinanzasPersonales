@@ -1,7 +1,7 @@
 <UserControl x:Class="FinanzasPersonales.Views.MetasView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="{StaticResource BgBrush}">
+             Background="{DynamicResource BgBrush}">
     <Grid Margin="32,28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -14,7 +14,7 @@
             <TextBlock Text="Metas de Ahorro" FontSize="26" FontWeight="Bold"/>
             <!-- D5: una meta es un apartado dentro de una cuenta, no un contador suelto. -->
             <TextBlock Text="Cada meta reserva parte del dinero de una cuenta. Apartar no saca dinero de la cuenta: sólo le da un destino. Usar registra el gasto real."
-                       Foreground="{StaticResource TextMutedBrush}" FontSize="12"
+                       Foreground="{DynamicResource TextMutedBrush}" FontSize="12"
                        TextWrapping="Wrap" Margin="0,6,0,0"/>
         </StackPanel>
 
@@ -62,7 +62,7 @@
                 </Grid>
 
                 <TextBlock Text="{Binding MensajeError}"
-                           Foreground="{StaticResource RedBrush}"
+                           Foreground="{DynamicResource RedBrush}"
                            FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
                            Visibility="{Binding MensajeErrorVisibility}"/>
             </StackPanel>
@@ -73,7 +73,7 @@
             <StackPanel>
 
                 <TextBlock Text="No tienes metas de ahorro aún. ¡Crea una para empezar!"
-                           Foreground="{StaticResource TextMutedBrush}"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            FontSize="14" HorizontalAlignment="Center"
                            Margin="0,40,0,0"
                            Visibility="{Binding SinMetasVisibility}"/>
@@ -94,9 +94,9 @@
                                                FontSize="17" FontWeight="Bold" Margin="0,0,0,4"/>
                                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                                         <TextBlock Text="{Binding CuentaTexto}"
-                                                   Foreground="{StaticResource AccentLightBrush}" FontSize="12"/>
+                                                   Foreground="{DynamicResource AccentLightBrush}" FontSize="12"/>
                                         <TextBlock Text="{Binding FechaLimite, StringFormat='  ·  Vence: {0:dd/MM/yyyy}'}"
-                                                   Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                                                   Foreground="{DynamicResource TextMutedBrush}" FontSize="12"/>
                                     </StackPanel>
 
                                     <!-- Progreso: lo apartado frente al objetivo -->
@@ -107,7 +107,7 @@
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0"
                                                    Text="{Binding ProgresoTexto}"
-                                                   Foreground="{StaticResource TextMutedBrush}"
+                                                   Foreground="{DynamicResource TextMutedBrush}"
                                                    FontSize="12"/>
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding ProgresoPercent, StringFormat='{}{0:F0}%'}"
@@ -123,7 +123,7 @@
                                     <!-- Meta de antes de D5: falta elegir la cuenta -->
                                     <StackPanel Visibility="{Binding SinCuentaVisibility}" Margin="0,0,0,12">
                                         <TextBlock Text="{Binding SinCuentaTexto}"
-                                                   Foreground="{StaticResource YellowBrush}" FontSize="12"
+                                                   Foreground="{DynamicResource YellowBrush}" FontSize="12"
                                                    TextWrapping="Wrap" Margin="0,0,0,8"/>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -143,7 +143,7 @@
                                     <!-- Apartar / Liberar / Usar -->
                                     <StackPanel Visibility="{Binding ConCuentaVisibility}">
                                         <TextBlock Text="{Binding LibreTexto}"
-                                                   Foreground="{StaticResource TextMutedBrush}"
+                                                   Foreground="{DynamicResource TextMutedBrush}"
                                                    FontSize="11" Margin="0,0,0,6"/>
                                         <TextBox Text="{Binding Monto, UpdateSourceTrigger=PropertyChanged}"
                                                  Tag="₡ Monto" Margin="0,0,0,8"/>
@@ -164,7 +164,7 @@
                                         <!-- Usar: se registra como un gasto real -->
                                         <StackPanel Visibility="{Binding UsoVisibility}" Margin="0,0,0,8">
                                             <TextBlock Text="Se registrará como gasto desde la cuenta de la meta."
-                                                       Foreground="{StaticResource TextMutedBrush}"
+                                                       Foreground="{DynamicResource TextMutedBrush}"
                                                        FontSize="11" Margin="0,0,0,6"/>
                                             <ComboBox ItemsSource="{Binding CategoriasGasto}"
                                                       SelectedItem="{Binding CategoriaUso}"
@@ -183,7 +183,7 @@
                                     </StackPanel>
 
                                     <TextBlock Text="{Binding MensajeError}"
-                                               Foreground="{StaticResource RedBrush}"
+                                               Foreground="{DynamicResource RedBrush}"
                                                FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
                                                Visibility="{Binding MensajeErrorVisibility}"/>
 

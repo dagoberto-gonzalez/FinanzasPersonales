@@ -1,3 +1,4 @@
+using FinanzasPersonales.Services;
 using System.Collections;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,10 +20,10 @@ public partial class BarChartControl : UserControl
         set => SetValue(ItemsProperty, value);
     }
 
-    private static readonly Brush BrushIngreso = new SolidColorBrush(Color.FromRgb(0xA6, 0xE3, 0xA1));
-    private static readonly Brush BrushGasto   = new SolidColorBrush(Color.FromRgb(0xF3, 0x8B, 0xA8));
-    private static readonly Brush BrushEje     = new SolidColorBrush(Color.FromRgb(0x3A, 0x3D, 0x52));
-    private static readonly Brush BrushLabel   = new SolidColorBrush(Color.FromRgb(0x6C, 0x70, 0x86));
+    private static Brush BrushIngreso => Temas.Pincel(Temas.Actual.Green);
+    private static Brush BrushGasto   => Temas.Pincel(Temas.Actual.Red);
+    private static Brush BrushEje     => Temas.Pincel(Temas.Actual.Border);
+    private static Brush BrushLabel   => Temas.Pincel(Temas.Actual.TextMuted);
 
     public BarChartControl()
     {

@@ -27,6 +27,8 @@ public partial class App : Application
         QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         _db = new AppDatabase();
+        // Antes de saber quién entra: el último tema usado en este equipo.
+        Temas.Aplicar(_db.ObtenerTemaDelEquipo());
         MostrarLogin();
     }
 
@@ -35,6 +37,7 @@ public partial class App : Application
         var loginWin = new LoginWindow(_db!);
         if (loginWin.ShowDialog() == true)
         {
+            Temas.Aplicar(_db!.ObtenerTema(SessionService.UsuarioId));
             var mainWin = new MainWindow(_db!);
             mainWin.WindowState = WindowState.Maximized;
             mainWin.Closed += MainWin_Closed;

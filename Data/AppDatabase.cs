@@ -200,6 +200,8 @@ public class AppDatabase
         MigrarInicioDeFijos(conn);
         MigrarPresupuestoPorUsuario(conn);
         MigrarMetasAApartados(conn);
+        if (!GetColumnas(conn, "Usuarios").Contains("Tema"))
+            AddColumna(conn, "Usuarios", "Tema", "TEXT NOT NULL DEFAULT 'Oscuro'");
         if (!GetColumnas(conn, "Transacciones").Contains("TransferenciaId"))
         {
             // Las dos mitades de una transferencia comparten este número (ver Transferir).
@@ -674,6 +676,33 @@ public class AppDatabase
         using var conn = Abrir();
         EjecutarNonQuery(conn, "UPDATE Usuarios SET PresupuestoMensual=$m WHERE Id=$id",
             ("$m", (double)monto), ("$id", usuarioId));
+    }
+
+    /// <summary>Tema elegido por el usuario (<see cref="Services.Temas"/>).</summary>
+    public string ObtenerTema(int usuarioId)
+    {
+        using var conn = Abrir();
+        return EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT Tema FROM Usuarios WHERE Id=$id), 'Oscuro')", ("$id", usuarioId));
+    }
+
+    /// <summary>
+    /// Guarda el tema del usuario y lo deja también como el del equipo: es el que muestra la
+    /// ventana de inicio de sesión, que se abre antes de saber quién va a entrar.
+    /// </summary>
+    public void GuardarTema(int usuarioId, string tema)
+    {
+        using var conn = Abrir();
+        EjecutarNonQuery(conn, "UPDATE Usuarios SET Tema=$t WHERE Id=$id", ("$t", tema), ("$id", usuarioId));
+        EjecutarNonQuery(conn, "INSERT OR REPLACE INTO Configuracion (Clave, Valor) VALUES ('tema', $t)", ("$t", tema));
+    }
+
+    /// <summary>Último tema usado en este equipo; el de la ventana de inicio de sesión.</summary>
+    public string ObtenerTemaDelEquipo()
+    {
+        using var conn = Abrir();
+        return EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT Valor FROM Configuracion WHERE Clave='tema'), 'Oscuro')");
     }
 
     /// <summary>Día 1 del mes, como se guarda <c>FechaInicio</c>. <c>default</c> = el mes actual.</summary>

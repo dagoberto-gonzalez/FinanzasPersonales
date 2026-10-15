@@ -32,8 +32,8 @@ public class ProblemaIntegridad
     // Paleta del tema oscuro (ver App.xaml)
     public string SeveridadColor => Severidad switch
     {
-        SeveridadProblema.Critico     => "#F38BA8",
-        SeveridadProblema.Advertencia => "#FAB387",
-        _                             => "#89B4FA"
+        SeveridadProblema.Critico     => Services.Temas.Actual.Red,
+        SeveridadProblema.Advertencia => Services.Temas.Actual.Orange,
+        _                             => Services.Temas.Actual.Blue
     };
 }

@@ -1,3 +1,4 @@
+using FinanzasPersonales.Services;
 using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
@@ -80,7 +81,7 @@ public partial class PieChartControl : UserControl
         {
             Width  = hole * 2,
             Height = hole * 2,
-            Fill   = new SolidColorBrush(Color.FromRgb(0x24, 0x27, 0x3A))
+            Fill   = Temas.Pincel(Temas.Actual.Card)
         };
         Canvas.SetLeft(holeEllipse, cx - hole);
         Canvas.SetTop(holeEllipse,  cy - hole);
@@ -94,7 +95,7 @@ public partial class PieChartControl : UserControl
         {
             Width  = 200,
             Height = 200,
-            Fill   = new SolidColorBrush(Color.FromRgb(0x31, 0x32, 0x44))
+            Fill   = Temas.Pincel(Temas.Actual.Track)
         };
         Canvas.SetLeft(circle, cx - 100);
         Canvas.SetTop(circle,  cy - 100);
@@ -104,7 +105,7 @@ public partial class PieChartControl : UserControl
         var tb = new TextBlock
         {
             Text       = "Sin datos",
-            Foreground = new SolidColorBrush(Color.FromRgb(0x6C, 0x70, 0x86)),
+            Foreground = Temas.Pincel(Temas.Actual.TextMuted),
             FontSize   = 13
         };
         tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));

@@ -6,15 +6,15 @@
         Width="460" SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        Background="#1E1E2E">
+        Background="{DynamicResource BgBrush}">
 
     <Grid>
         <Border HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Width="380"
                 Margin="0,32"
-                Background="#24273A"
-                BorderBrush="#3A3D52"
+                Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="16"
                 Padding="36,32">
@@ -22,43 +22,43 @@
 
                 <TextBlock Text="Registrar ingreso laboral"
                            FontSize="20" FontWeight="Bold"
-                           Foreground="#CDD6F4"
+                           Foreground="{DynamicResource TextBrush}"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,4"/>
                 <TextBlock Text="Revisa y ajusta los datos antes de confirmar."
                            FontSize="12"
-                           Foreground="#6C7086"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            HorizontalAlignment="Center"
                            Margin="0,0,0,28"/>
 
                 <!-- Fecha -->
                 <TextBlock Text="Fecha (dd/MM/yyyy)"
-                           Foreground="#6C7086" FontSize="12" Margin="0,0,0,6"/>
+                           Foreground="{DynamicResource TextMutedBrush}" FontSize="12" Margin="0,0,0,6"/>
                 <TextBox x:Name="TxtFecha"
                          Margin="0,0,0,16"/>
 
                 <!-- Monto -->
                 <TextBlock Text="Monto"
-                           Foreground="#6C7086" FontSize="12" Margin="0,0,0,6"/>
+                           Foreground="{DynamicResource TextMutedBrush}" FontSize="12" Margin="0,0,0,6"/>
                 <TextBox x:Name="TxtMonto"
                          Margin="0,0,0,16"/>
 
                 <!-- Descripción -->
                 <TextBlock Text="Descripción"
-                           Foreground="#6C7086" FontSize="12" Margin="0,0,0,6"/>
+                           Foreground="{DynamicResource TextMutedBrush}" FontSize="12" Margin="0,0,0,6"/>
                 <TextBox x:Name="TxtDescripcion"
                          Margin="0,0,0,16"/>
 
                 <!-- Cuenta -->
                 <TextBlock Text="Acreditar a cuenta (opcional)"
-                           Foreground="#6C7086" FontSize="12" Margin="0,0,0,6"/>
+                           Foreground="{DynamicResource TextMutedBrush}" FontSize="12" Margin="0,0,0,6"/>
                 <ComboBox x:Name="CboCuentas"
                           DisplayMemberPath="Nombre"
                           Margin="0,0,0,24"/>
 
                 <!-- Error -->
                 <TextBlock x:Name="TxtError"
-                           Foreground="#F38BA8"
+                           Foreground="{DynamicResource RedBrush}"
                            FontSize="12"
                            TextWrapping="Wrap"
                            Margin="0,0,0,16"

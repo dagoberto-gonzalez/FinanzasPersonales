@@ -87,7 +87,7 @@ public class PresupuestoTests
         Assert.Equal(Visibility.Visible,   vm.ConPresupuestoVisibility);
         Assert.Equal(Visibility.Collapsed, vm.EdicionPresupuestoVisibility);
         Assert.Contains("280.000", vm.PresupuestoRestanteTexto);   // te quedan
-        Assert.Equal("#A6E3A1", vm.PresupuestoColor);              // verde: 30 %
+        Assert.Equal("#4ADE80", vm.PresupuestoColor);              // verde: 30 %
     }
 
     [Fact]
@@ -97,13 +97,13 @@ public class PresupuestoTests
         t.Db.GuardarPresupuesto(t.UsuarioId, 100_000);
         Gastar(t, 85_000);
         var vm = new DashboardViewModel(t.Db, t.UsuarioId);
-        Assert.Equal("#F9E2AF", vm.PresupuestoColor);
+        Assert.Equal("#FCD34D", vm.PresupuestoColor);
         Assert.Equal(Visibility.Collapsed, vm.BannerPresupuestoVisibility);
 
         Gastar(t, 20_000);
         vm.Cargar();
 
-        Assert.Equal("#F38BA8", vm.PresupuestoColor);
+        Assert.Equal("#FB7185", vm.PresupuestoColor);
         Assert.Contains("Te pasaste por ₡5.000", vm.PresupuestoRestanteTexto);
         Assert.Equal(Visibility.Visible, vm.BannerPresupuestoVisibility);
     }

@@ -160,7 +160,7 @@ public class ControlLaboralViewModel : BaseViewModel
         get => _cfgMensajeOk;
         set { _cfgMensajeOk = value; OnPropertyChanged(); OnPropertyChanged(nameof(ConfigMensajeColor)); }
     }
-    public string     ConfigMensajeColor      => _cfgMensajeOk ? "#A6E3A1" : "#F38BA8";
+    public string     ConfigMensajeColor      => _cfgMensajeOk ? Temas.Actual.Green : Temas.Actual.Red;
     public Visibility ConfigMensajeVisibility =>
         string.IsNullOrEmpty(_cfgMensaje) ? Visibility.Collapsed : Visibility.Visible;
 

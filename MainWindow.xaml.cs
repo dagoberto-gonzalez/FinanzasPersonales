@@ -26,6 +26,9 @@ public partial class MainWindow : Window
     private AdminView?           _adminView;
     private ControlLaboralView?  _controlLaboralView;
 
+    /// <summary>Sección en pantalla, para volver a mostrarla al cambiar de tema.</summary>
+    private Action _seccionActual = () => { };
+
     public MainWindow(AppDatabase db)
     {
         InitializeComponent();
@@ -40,7 +43,33 @@ public partial class MainWindow : Window
             BtnAdmin.Visibility   = Visibility.Visible;
         }
 
+        ActualizarBotonTema();
         MostrarDashboard();
+    }
+
+    // ── Tema ──────────────────────────────────────────────────────────────────
+
+    private void ActualizarBotonTema()
+    {
+        var oscuro = Temas.Actual.Nombre == Temas.Oscuro;
+        TxtTemaIcono.Text = oscuro ? "☀" : "\U0001F319";   // ☀ / 🌙
+        TxtTema.Text      = oscuro ? "  Tema claro" : "  Tema oscuro";
+    }
+
+    private void BtnTema_Click(object s, RoutedEventArgs e)
+    {
+        var nuevo = Temas.Actual.Nombre == Temas.Oscuro ? Temas.Claro : Temas.Oscuro;
+        _db.GuardarTema(_uid, nuevo);
+        Temas.Aplicar(nuevo);
+        ActualizarBotonTema();
+
+        // Lo que usa DynamicResource ya cambió solo; los colores que un ViewModel eligió según
+        // el dato (verde/rojo, gráficos) se calcularon con el tema anterior. Se descartan las
+        // vistas para que se creen de nuevo con el tema nuevo.
+        _dashView = null; _transView = null; _metasView = null; _gastosFijosView = null;
+        _ingresosFijosView = null; _tarjetasView = null; _cuentasView = null; _reportesView = null;
+        _cambiarPwdView = null; _categoriasView = null; _adminView = null; _controlLaboralView = null;
+        _seccionActual();
     }
 
     // ── Fábricas de vistas (lazy) ─────────────────────────────────────────────
@@ -159,6 +188,7 @@ public partial class MainWindow : Window
 
     private void MostrarDashboard()
     {
+        _seccionActual = MostrarDashboard;
         var v = ObtenerDashboard();
         v.Actualizar();
         MainContent.Content = v;
@@ -169,6 +199,7 @@ public partial class MainWindow : Window
 
     private void MostrarTransacciones()
     {
+        _seccionActual = MostrarTransacciones;
         var v = ObtenerTransacciones();
         v.Actualizar();
         MainContent.Content = v;
@@ -179,6 +210,7 @@ public partial class MainWindow : Window
 
     private void MostrarMetas()
     {
+        _seccionActual = MostrarMetas;
         var v = ObtenerMetas();
         v.Actualizar();
         MainContent.Content = v;
@@ -189,6 +221,7 @@ public partial class MainWindow : Window
 
     private void MostrarGastosFijos()
     {
+        _seccionActual = MostrarGastosFijos;
         var v = ObtenerGastosFijos();
         v.Actualizar();
         MainContent.Content = v;
@@ -199,6 +232,7 @@ public partial class MainWindow : Window
 
     private void MostrarIngresosFijos()
     {
+        _seccionActual = MostrarIngresosFijos;
         var v = ObtenerIngresosFijos();
         v.Actualizar();
         MainContent.Content = v;
@@ -209,6 +243,7 @@ public partial class MainWindow : Window
 
     private void MostrarTarjetas()
     {
+        _seccionActual = MostrarTarjetas;
         var v = ObtenerTarjetas();
         v.Actualizar();
         MainContent.Content = v;
@@ -219,6 +254,7 @@ public partial class MainWindow : Window
 
     private void MostrarCuentas()
     {
+        _seccionActual = MostrarCuentas;
         var v = ObtenerCuentas();
         v.Actualizar();
         MainContent.Content = v;
@@ -229,6 +265,7 @@ public partial class MainWindow : Window
 
     private void MostrarReportes()
     {
+        _seccionActual = MostrarReportes;
         var v = ObtenerReportes();
         v.Actualizar();
         MainContent.Content = v;
@@ -239,6 +276,7 @@ public partial class MainWindow : Window
 
     private void MostrarCambiarPassword()
     {
+        _seccionActual = MostrarCambiarPassword;
         var v = ObtenerCambiarPassword();
         MainContent.Content = v;
         DesactivarTodos();
@@ -248,6 +286,7 @@ public partial class MainWindow : Window
 
     private void MostrarCategorias()
     {
+        _seccionActual = MostrarCategorias;
         var v = ObtenerCategorias();
         v.Actualizar();
         MainContent.Content = v;
@@ -259,6 +298,7 @@ public partial class MainWindow : Window
     private void MostrarAdmin()
     {
         if (!SessionService.EsAdmin) return;
+        _seccionActual = MostrarAdmin;
         var v = ObtenerAdmin();
         v.Actualizar();
         MainContent.Content = v;
@@ -269,6 +309,7 @@ public partial class MainWindow : Window
 
     private void MostrarControlLaboral()
     {
+        _seccionActual = MostrarControlLaboral;
         var v = ObtenerControlLaboral();
         v.Actualizar();
         MainContent.Content = v;

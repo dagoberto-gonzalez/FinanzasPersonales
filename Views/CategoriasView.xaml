@@ -1,7 +1,7 @@
 <UserControl x:Class="FinanzasPersonales.Views.CategoriasView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="{StaticResource BgBrush}">
+             Background="{DynamicResource BgBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     </UserControl.Resources>
@@ -11,7 +11,7 @@
 
             <TextBlock Text="Categorías" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
             <TextBlock Text="Gestiona las categorías para clasificar tus transacciones."
-                       Foreground="{StaticResource TextMutedBrush}" FontSize="13" Margin="0,0,0,24"/>
+                       Foreground="{DynamicResource TextMutedBrush}" FontSize="13" Margin="0,0,0,24"/>
 
             <!-- Agregar categoría -->
             <Border Style="{StaticResource Card}" Margin="0,0,0,20">
@@ -42,11 +42,11 @@
                     <!-- Checkbox "Global" solo para admin -->
                     <CheckBox Content="Categoría global (visible para todos los usuarios)"
                               IsChecked="{Binding NuevaEsGlobal}"
-                              Foreground="{StaticResource TextMutedBrush}"
+                              Foreground="{DynamicResource TextMutedBrush}"
                               FontSize="12" Margin="0,10,0,0"
                               Visibility="{Binding CheckGlobalVisibility}"/>
                     <TextBlock Text="{Binding MensajeError}"
-                               Foreground="{StaticResource RedBrush}"
+                               Foreground="{DynamicResource RedBrush}"
                                FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
                                Visibility="{Binding MensajeErrorVisibility}"/>
                 </StackPanel>
@@ -60,7 +60,7 @@
                     <ItemsControl ItemsSource="{Binding Categorias}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="#2A2D3E" CornerRadius="8" Padding="14,10" Margin="0,0,0,6">
+                                <Border Background="{DynamicResource CardBrush}" CornerRadius="8" Padding="14,10" Margin="0,0,0,6">
                                     <StackPanel>
 
                                         <!-- ── Fila normal ── -->
@@ -75,7 +75,7 @@
 
                                             <!-- Badge "Global" -->
                                             <Border Grid.Column="0" CornerRadius="4" Padding="6,2"
-                                                    Background="#3A3D52" Margin="0,0,8,0"
+                                                    Background="{DynamicResource BorderBrush}" Margin="0,0,8,0"
                                                     VerticalAlignment="Center">
                                                 <Border.Style>
                                                     <Style TargetType="Border">
@@ -88,7 +88,7 @@
                                                     </Style>
                                                 </Border.Style>
                                                 <TextBlock Text="GLOBAL" FontSize="10" FontWeight="Bold"
-                                                           Foreground="{StaticResource AccentLightBrush}"/>
+                                                           Foreground="{DynamicResource AccentLightBrush}"/>
                                             </Border>
 
                                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -96,7 +96,7 @@
                                                            FontSize="13" FontWeight="SemiBold"
                                                            VerticalAlignment="Center"/>
                                                 <TextBlock Text="{Binding TipoTexto}"
-                                                           Foreground="{StaticResource TextMutedBrush}"
+                                                           Foreground="{DynamicResource TextMutedBrush}"
                                                            FontSize="11" Margin="10,0,0,0"
                                                            VerticalAlignment="Center"/>
                                             </StackPanel>
@@ -160,7 +160,7 @@
                                             </Grid>
 
                                             <TextBlock Text="{Binding MensajeError}"
-                                                       Foreground="{StaticResource RedBrush}"
+                                                       Foreground="{DynamicResource RedBrush}"
                                                        FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"
                                                        Visibility="{Binding MensajeErrorVisibility}"/>
                                         </StackPanel>
@@ -172,7 +172,7 @@
                     </ItemsControl>
 
                     <TextBlock Text="No hay categorías registradas."
-                               Foreground="{StaticResource TextMutedBrush}"
+                               Foreground="{DynamicResource TextMutedBrush}"
                                FontSize="13" Margin="0,8,0,0">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -190,7 +190,7 @@
 
             <!-- Avisos de altas y bajas; los de edición salen dentro de su propia fila -->
             <TextBlock Text="{Binding MensajeOk}"
-                       Foreground="{StaticResource GreenBrush}"
+                       Foreground="{DynamicResource GreenBrush}"
                        FontSize="12" Margin="0,14,0,0" TextWrapping="Wrap"
                        Visibility="{Binding MensajeOkVisibility}"/>
 

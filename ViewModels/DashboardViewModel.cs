@@ -11,18 +11,8 @@ namespace FinanzasPersonales.ViewModels;
 
 public class DashboardViewModel : BaseViewModel
 {
-    private static readonly Color[] PieColors =
-    {
-        Color.FromRgb(0xF3, 0x8B, 0xA8),
-        Color.FromRgb(0xFA, 0xB3, 0x87),
-        Color.FromRgb(0xF9, 0xE2, 0xAF),
-        Color.FromRgb(0xA6, 0xE3, 0xA1),
-        Color.FromRgb(0x89, 0xB4, 0xFA),
-        Color.FromRgb(0xCB, 0xA6, 0xF7),
-    };
-
-    private static readonly Brush BrushVerde = new SolidColorBrush(Color.FromRgb(0xA6, 0xE3, 0xA1));
-    private static readonly Brush BrushRojo  = new SolidColorBrush(Color.FromRgb(0xF3, 0x8B, 0xA8));
+    private static Brush BrushVerde => Temas.Pincel(Temas.Actual.Green);
+    private static Brush BrushRojo  => Temas.Pincel(Temas.Actual.Red);
 
     private readonly AppDatabase _db;
     private readonly int         _uid;
@@ -140,8 +130,8 @@ public class DashboardViewModel : BaseViewModel
 
     /// <summary>Verde, amarillo desde el 80 %, rojo al pasarse.</summary>
     public string PresupuestoColor =>
-        PresupuestoExcedido                   ? "#F38BA8" :
-        PresupuestoFraccion >= UmbralAviso    ? "#F9E2AF" : "#A6E3A1";
+        PresupuestoExcedido                   ? Temas.Actual.Red :
+        PresupuestoFraccion >= UmbralAviso    ? Temas.Actual.Yellow : Temas.Actual.Green;
 
     // La barra son dos columnas en estrella: lo gastado y lo que queda.
     public GridLength BarraLlena => new((double)Math.Min(PresupuestoFraccion, 1m), GridUnitType.Star);
@@ -368,7 +358,7 @@ public class DashboardViewModel : BaseViewModel
                 Label      = kvp.Key,
                 Value      = kvp.Value,
                 Percentage = total > 0 ? kvp.Value / total * 100 : 0,
-                ColorBrush = new SolidColorBrush(PieColors[i % PieColors.Length])
+                ColorBrush = Temas.Pincel(Temas.Actual.Grafico[i % Temas.Actual.Grafico.Length])
             })
             .ToList();
     }

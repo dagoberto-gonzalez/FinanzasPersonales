@@ -1,7 +1,7 @@
 <UserControl x:Class="FinanzasPersonales.Views.TransaccionesView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="{StaticResource BgBrush}">
+             Background="{DynamicResource BgBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     </UserControl.Resources>
@@ -21,7 +21,7 @@
             <StackPanel>
 
                 <!-- Modo edición: el mismo formulario, rellenado con la transacción elegida. -->
-                <Border Background="#7C3AED22" CornerRadius="6" Padding="12,6" Margin="0,0,0,10"
+                <Border Background="{DynamicResource AccentTintBrush}" CornerRadius="6" Padding="12,6" Margin="0,0,0,10"
                         Visibility="{Binding EditandoVisibility}">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -62,7 +62,7 @@
                     </StackPanel>
 
                     <!-- Separador visual -->
-                    <Border Grid.Column="2" Width="1" Background="{StaticResource BorderBrush}" VerticalAlignment="Stretch"/>
+                    <Border Grid.Column="2" Width="1" Background="{DynamicResource BorderBrush}" VerticalAlignment="Stretch"/>
 
                     <!-- Monto -->
                     <TextBox Grid.Column="4"
@@ -118,10 +118,10 @@
                                 <TextBlock Text="{Binding Nombre}">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding EsEncabezado}" Value="True">
-                                                    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
                                                     <Setter Property="FontSize"   Value="11"/>
                                                     <Setter Property="Margin"     Value="0,4,0,2"/>
                                                 </DataTrigger>
@@ -150,7 +150,7 @@
                 </Grid>
 
                 <TextBlock Text="{Binding MensajeError}"
-                           Foreground="{StaticResource RedBrush}"
+                           Foreground="{DynamicResource RedBrush}"
                            FontSize="12" Margin="0,8,0,0"
                            Visibility="{Binding MensajeErrorVisibility}"/>
             </StackPanel>
@@ -178,24 +178,24 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Column="0" Text="Buscar:"
-                           Foreground="{StaticResource TextMutedBrush}"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <TextBox Grid.Column="1"
                          Text="{Binding BusquedaTexto, UpdateSourceTrigger=PropertyChanged}"
                          Tag="Descripción, categoría, cuenta..."/>
 
                 <TextBlock Grid.Column="3" Text="Desde:"
-                           Foreground="{StaticResource TextMutedBrush}"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <DatePicker Grid.Column="4" SelectedDate="{Binding FiltroDesde}"/>
 
                 <TextBlock Grid.Column="6" Text="Hasta:"
-                           Foreground="{StaticResource TextMutedBrush}"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <DatePicker Grid.Column="7" SelectedDate="{Binding FiltroHasta}"/>
 
                 <TextBlock Grid.Column="9" Text="Categoría:"
-                           Foreground="{StaticResource TextMutedBrush}"
+                           Foreground="{DynamicResource TextMutedBrush}"
                            VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <ComboBox Grid.Column="10"
                           ItemsSource="{Binding CategoriasFiltro}"
@@ -227,10 +227,10 @@
                                         HorizontalAlignment="Left" Margin="0,4">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="#1A3B2A"/>
+                                            <Setter Property="Background" Value="{DynamicResource GreenRowBrush}"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Tipo}" Value="Gasto">
-                                                    <Setter Property="Background" Value="#3B1A1A"/>
+                                                    <Setter Property="Background" Value="{DynamicResource RedRowBrush}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -238,10 +238,10 @@
                                     <TextBlock Text="{Binding Tipo}" FontSize="12" FontWeight="SemiBold">
                                         <TextBlock.Style>
                                             <Style TargetType="TextBlock">
-                                                <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource GreenBrush}"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding Tipo}" Value="Gasto">
-                                                        <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource RedBrush}"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -276,10 +276,10 @@
                                            FontWeight="SemiBold">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource GreenBrush}"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Tipo}" Value="Gasto">
-                                                    <Setter Property="Foreground" Value="{StaticResource RedBrush}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource RedBrush}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>

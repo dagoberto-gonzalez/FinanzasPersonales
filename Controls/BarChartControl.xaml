@@ -8,7 +8,7 @@
                    Text="Sin datos"
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center"
-                   Foreground="#6C7086"
+                   Foreground="{DynamicResource TextMutedBrush}"
                    Visibility="Collapsed"/>
     </Grid>
 </UserControl>
