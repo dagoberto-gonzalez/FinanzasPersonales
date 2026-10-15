@@ -35,12 +35,17 @@ public partial class App : Application
                     if (!w.Title.EndsWith(" · DESARROLLO")) w.Title += " · DESARROLLO";
                 }));
 
-        _db = new AppDatabase();
+        // Copia del día ANTES de abrir la base: abrirla corre las migraciones, y si una versión
+        // nueva las trae, la copia tiene que ser de cómo estaba antes. Si falla (disco lleno,
+        // permisos) la aplicación sigue: el Panel Admin muestra la fecha de la última copia.
+        var ruta = AppDatabase.RutaPorDefecto();
+        if (System.IO.File.Exists(ruta))
+        {
+            try { CopiasDeSeguridad.CopiaAutomatica(ruta, DateTime.Now); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Copia automática: {ex.Message}"); }
+        }
 
-        // Copia del día, antes de que nadie toque nada. Si falla (disco lleno, permisos) la
-        // aplicación sigue: el Panel Admin muestra la fecha de la última copia.
-        try { CopiasDeSeguridad.CopiaAutomatica(_db, DateTime.Now); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Copia automática: {ex.Message}"); }
+        _db = new AppDatabase(ruta);
         // Antes de saber quién entra: el último tema usado en este equipo.
         Temas.Aplicar(_db.ObtenerTemaDelEquipo());
         MostrarLogin();

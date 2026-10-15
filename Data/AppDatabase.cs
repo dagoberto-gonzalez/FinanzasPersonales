@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using Microsoft.Data.Sqlite;
 using FinanzasPersonales.Models;
@@ -27,6 +28,11 @@ public class AppDatabase
     /// <summary>Nombre del archivo por defecto: el real o el de desarrollo.</summary>
     public const string NombreArchivo = EsDesarrollo ? "finanzas-dev.db" : "finanzas.db";
 
+    /// <summary><c>%APPDATA%\FinanzasPersonales\</c> + <see cref="NombreArchivo"/>.</summary>
+    public static string RutaPorDefecto() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "FinanzasPersonales", NombreArchivo);
+
     /// <summary>
     /// Abre (o crea) la base de datos.
     /// </summary>
@@ -37,19 +43,9 @@ public class AppDatabase
     /// </param>
     public AppDatabase(string? dbPath = null)
     {
-        if (string.IsNullOrWhiteSpace(dbPath))
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "FinanzasPersonales");
-            Directory.CreateDirectory(dir);
-            dbPath = Path.Combine(dir, NombreArchivo);
-        }
-        else
-        {
-            var dir = Path.GetDirectoryName(dbPath);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        }
+        if (string.IsNullOrWhiteSpace(dbPath)) dbPath = RutaPorDefecto();
+        var dir = Path.GetDirectoryName(dbPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
         RutaArchivo = dbPath;
         _cs         = $"Data Source={dbPath}";
@@ -224,6 +220,7 @@ public class AppDatabase
             AddColumna(conn, "Transacciones", "TransferenciaId", "INTEGER");
             EjecutarNonQuery(conn, "CREATE INDEX IF NOT EXISTS IX_Transacciones_TransferenciaId ON Transacciones(TransferenciaId)");
         }
+        MigrarBalanceAcumuladoConSaldoInicial(conn);
         // Índices (al final: dependen de columnas que crean las migraciones anteriores)
         CrearIndices(conn);
         // Datos globales iniciales
@@ -3180,6 +3177,50 @@ public class AppDatabase
         return (ingresos, gastos, numTrans);
     }
 
+    /// <summary>
+    /// El Disponible del Dashboard tal como era al final de <paramref name="fecha"/>: saldos
+    /// iniciales de las cuentas + todo el eje efectivo hasta ese día (cuentas y efectivo).
+    /// <para>
+    /// Antes sumaba sólo las transacciones, sin los saldos iniciales: el mismo error que tuvo el
+    /// Dashboard. El saldo inicial no tiene fecha, así que cuenta en todos los meses.
+    /// </para>
+    /// </summary>
+    private static decimal DisponibleAl(SqliteConnection conn, int usuarioId, DateTime fecha) =>
+        (decimal)EjecutarScalar<double>(conn, """
+            SELECT COALESCE((SELECT SUM(SaldoInicial) FROM Cuentas WHERE UsuarioId=$uid), 0)
+                 + COALESCE((SELECT SUM(CASE WHEN Tipo='Ingreso' THEN Monto ELSE -Monto END)
+                             FROM Transacciones
+                             WHERE UsuarioId=$uid AND Fecha <= $hasta
+                               AND TarjetaCreditoId IS NULL), 0)   -- eje efectivo
+            """,
+            ("$uid", usuarioId), ("$hasta", fecha.ToString("yyyy-MM-dd")));
+
+    /// <summary>
+    /// Corrige una sola vez el balance acumulado de los cierres guardados con la fórmula vieja,
+    /// que dejaba fuera los saldos iniciales. Sólo esa columna: ingresos y gastos eran correctos.
+    /// </summary>
+    private static void MigrarBalanceAcumuladoConSaldoInicial(SqliteConnection conn)
+    {
+        const string marca = "cierres_con_saldo_inicial";
+        if (EjecutarScalar<long>(conn, "SELECT COUNT(*) FROM Configuracion WHERE Clave=$c", ("$c", marca)) > 0)
+            return;
+
+        var cierres = new List<(long Id, int Uid, int Anio, int Mes)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT Id, UsuarioId, Anio, Mes FROM ResumenMensual";
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) cierres.Add((r.GetInt64(0), r.GetInt32(1), r.GetInt32(2), r.GetInt32(3)));
+        }
+        foreach (var c in cierres)
+        {
+            var fin = new DateTime(c.Anio, c.Mes, 1).AddMonths(1).AddDays(-1);
+            EjecutarNonQuery(conn, "UPDATE ResumenMensual SET BalanceAcumulado=$b WHERE Id=$id",
+                ("$b", (double)DisponibleAl(conn, c.Uid, fin)), ("$id", c.Id));
+        }
+        EjecutarNonQuery(conn, "INSERT INTO Configuracion (Clave, Valor) VALUES ($c, '1')", ("$c", marca));
+    }
+
     /// <summary>Genera el snapshot del mes y lo guarda en ResumenMensual. Idempotente.</summary>
     public void CerrarMes(int usuarioId, int anio, int mes, string notas = "")
     {
@@ -3214,20 +3255,7 @@ public class AppDatabase
             }
         }
 
-        // Balance acumulado al final del mes
-        decimal balanceAcum;
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = """
-                SELECT COALESCE(SUM(CASE WHEN Tipo='Ingreso' THEN Monto ELSE -Monto END), 0)
-                FROM Transacciones
-                WHERE UsuarioId=$uid AND Fecha <= $hasta
-                  AND TarjetaCreditoId IS NULL   -- eje efectivo: cuánto quedó de verdad
-                """;
-            cmd.Parameters.AddWithValue("$uid",   usuarioId);
-            cmd.Parameters.AddWithValue("$hasta", hasta);
-            balanceAcum = (decimal)Convert.ToDouble(cmd.ExecuteScalar() ?? 0.0);
-        }
+        var balanceAcum = DisponibleAl(conn, usuarioId, fin);
 
         // ¿El período laboral de ese mes está cerrado?
         bool periodoLaboral;
@@ -3300,6 +3328,41 @@ public class AppDatabase
                 Notas            = r.IsDBNull(10) ? "" : r.GetString(10)
             });
         return list;
+    }
+
+    /// <summary>
+    /// Meses ya terminados que el usuario no ha cerrado, del más antiguo al más reciente.
+    /// Se cuenta desde que empezó a usar la app (su alta o su primer movimiento, lo que sea antes):
+    /// antes sólo se miraba el mes anterior, así que un usuario nuevo tenía que "cerrar" un mes en
+    /// el que no existía, y si pasaban dos meses sin abrir la app, el más viejo nunca se ofrecía.
+    /// </summary>
+    public List<(int Anio, int Mes)> MesesSinCerrar(int usuarioId, DateTime hoy)
+    {
+        using var conn = Abrir();
+        var alta    = EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT FechaCreacion FROM Usuarios WHERE Id=$id), '')", ("$id", usuarioId));
+        var primero = EjecutarScalar<string>(conn,
+            "SELECT COALESCE((SELECT MIN(Fecha) FROM Transacciones WHERE UsuarioId=$id), '')", ("$id", usuarioId));
+
+        var desde = new DateTime(hoy.Year, hoy.Month, 1);
+        foreach (var texto in new[] { alta, primero })
+            if (DateTime.TryParse(texto, CultureInfo.InvariantCulture, DateTimeStyles.None, out var f) && f < desde)
+                desde = new DateTime(f.Year, f.Month, 1);
+
+        var cerrados = new HashSet<(int, int)>();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT Anio, Mes FROM ResumenMensual WHERE UsuarioId=$id";
+            cmd.Parameters.AddWithValue("$id", usuarioId);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) cerrados.Add((r.GetInt32(0), r.GetInt32(1)));
+        }
+
+        var pendientes = new List<(int, int)>();
+        for (var m = desde; m < new DateTime(hoy.Year, hoy.Month, 1); m = m.AddMonths(1))
+            if (!cerrados.Contains((m.Year, m.Month)))
+                pendientes.Add((m.Year, m.Month));
+        return pendientes;
     }
 
     public bool MesCerrado(int usuarioId, int anio, int mes)

@@ -157,7 +157,9 @@ public class Bloque2D2Tests
         var resumen = t.Db.ObtenerResumenesMensuales(t.UsuarioId).Single();
 
         Assert.Equal(85000m, resumen.Gastos);            // lo gastado en setiembre
-        Assert.Equal(0m,     resumen.BalanceAcumulado);  // aún no había salido efectivo
+        // Aún no había salido efectivo: queda el saldo inicial de la cuenta, como en el Disponible.
+        // (Antes daba 0: el acumulado dejaba fuera los saldos iniciales.)
+        Assert.Equal(500000m, resumen.BalanceAcumulado);
 
         // El verificador usa el mismo eje que CerrarMes, así que no reporta desfase de cierre.
         // Lo único que queda abierto es el saldo de la tarjeta: sigue siendo un contador que se

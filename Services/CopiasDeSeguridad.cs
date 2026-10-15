@@ -26,19 +26,19 @@ public static class CopiasDeSeguridad
 
     private const string FormatoFecha = "yyyy-MM-dd_HHmmss";
 
-    public static string Carpeta(AppDatabase db) =>
-        Path.Combine(Path.GetDirectoryName(db.RutaArchivo)!, "Copias");
+    public static string Carpeta(string rutaDb) =>
+        Path.Combine(Path.GetDirectoryName(rutaDb)!, "Copias");
 
     /// <summary>"finanzas" o "finanzas-dev": la versión de desarrollo tiene sus propias copias.</summary>
-    private static string Base(AppDatabase db) => Path.GetFileNameWithoutExtension(db.RutaArchivo);
+    private static string Base(string rutaDb) => Path.GetFileNameWithoutExtension(rutaDb);
 
-    private static Regex PatronAutomatica(AppDatabase db) =>
-        new($"^{Regex.Escape(Base(db))}_(\\d{{4}}-\\d{{2}}-\\d{{2}}_\\d{{6}})\\.db$");
+    private static Regex PatronAutomatica(string rutaDb) =>
+        new($"^{Regex.Escape(Base(rutaDb))}_(\\d{{4}}-\\d{{2}}-\\d{{2}}_\\d{{6}})\\.db$");
 
     /// <summary>Copia la base completa (todos los usuarios) a <paramref name="destino"/>.</summary>
-    public static void Crear(AppDatabase db, string destino)
+    public static void Crear(string rutaDb, string destino)
     {
-        if (Path.GetFullPath(destino).Equals(Path.GetFullPath(db.RutaArchivo), StringComparison.OrdinalIgnoreCase))
+        if (Path.GetFullPath(destino).Equals(Path.GetFullPath(rutaDb), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("No se puede guardar la copia encima de la base de datos en uso.");
 
         var dir = Path.GetDirectoryName(destino);
@@ -47,7 +47,7 @@ public static class CopiasDeSeguridad
         // Si el destino ya existe (el usuario eligió sobrescribir), se reemplaza entero.
         if (File.Exists(destino)) File.Delete(destino);
 
-        using var origen = new SqliteConnection($"Data Source={db.RutaArchivo}");
+        using var origen = new SqliteConnection($"Data Source={rutaDb}");
         // Sin pool: al cerrar se suelta el archivo, y se puede mover o copiar a un USB enseguida.
         using var copia  = new SqliteConnection($"Data Source={destino};Pooling=False");
         origen.Open();
@@ -59,29 +59,29 @@ public static class CopiasDeSeguridad
     /// La copia del día: si hoy todavía no se hizo, la hace y poda las más viejas.
     /// Devuelve la ruta creada, o <c>null</c> si ya había una de hoy.
     /// </summary>
-    public static string? CopiaAutomatica(AppDatabase db, DateTime ahora)
+    public static string? CopiaAutomatica(string rutaDb, DateTime ahora)
     {
-        var carpeta = Carpeta(db);
+        var carpeta = Carpeta(rutaDb);
         Directory.CreateDirectory(carpeta);
 
-        var hoy = $"{Base(db)}_{ahora:yyyy-MM-dd}_";
+        var hoy = $"{Base(rutaDb)}_{ahora:yyyy-MM-dd}_";
         if (Directory.EnumerateFiles(carpeta, hoy + "*.db").Any()) return null;
 
-        var ruta = Path.Combine(carpeta, $"{Base(db)}_{ahora.ToString(FormatoFecha, CultureInfo.InvariantCulture)}.db");
-        Crear(db, ruta);
+        var ruta = Path.Combine(carpeta, $"{Base(rutaDb)}_{ahora.ToString(FormatoFecha, CultureInfo.InvariantCulture)}.db");
+        Crear(rutaDb, ruta);
 
-        foreach (var vieja in Automaticas(db).Skip(Conservar))
+        foreach (var vieja in Automaticas(rutaDb).Skip(Conservar))
             vieja.Delete();
 
         return ruta;
     }
 
     /// <summary>Copias automáticas, de la más nueva a la más vieja.</summary>
-    public static List<FileInfo> Automaticas(AppDatabase db)
+    public static List<FileInfo> Automaticas(string rutaDb)
     {
-        var carpeta = Carpeta(db);
+        var carpeta = Carpeta(rutaDb);
         if (!Directory.Exists(carpeta)) return [];
-        var patron = PatronAutomatica(db);
+        var patron = PatronAutomatica(rutaDb);
         return new DirectoryInfo(carpeta).EnumerateFiles("*.db")
             .Where(f => patron.IsMatch(f.Name))
             .OrderByDescending(f => f.Name, StringComparer.Ordinal)
@@ -89,11 +89,11 @@ public static class CopiasDeSeguridad
     }
 
     /// <summary>Fecha de la copia automática más reciente, si hay alguna.</summary>
-    public static DateTime? UltimaAutomatica(AppDatabase db)
+    public static DateTime? UltimaAutomatica(string rutaDb)
     {
-        var ultima = Automaticas(db).FirstOrDefault();
+        var ultima = Automaticas(rutaDb).FirstOrDefault();
         if (ultima is null) return null;
-        var m = PatronAutomatica(db).Match(ultima.Name);
+        var m = PatronAutomatica(rutaDb).Match(ultima.Name);
         return DateTime.ParseExact(m.Groups[1].Value, FormatoFecha, CultureInfo.InvariantCulture);
     }
 
@@ -130,19 +130,19 @@ public static class CopiasDeSeguridad
     /// migraciones sólo corren al abrir la base.
     /// </para>
     /// </summary>
-    public static string Restaurar(AppDatabase db, string archivo, DateTime ahora)
+    public static string Restaurar(string rutaDb, string archivo, DateTime ahora)
     {
         var motivo = MotivoNoRestaurable(archivo);
         if (motivo is not null) throw new InvalidOperationException(motivo);
-        if (Path.GetFullPath(archivo).Equals(Path.GetFullPath(db.RutaArchivo), StringComparison.OrdinalIgnoreCase))
+        if (Path.GetFullPath(archivo).Equals(Path.GetFullPath(rutaDb), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Ese archivo es la base de datos en uso, no una copia.");
 
-        var seguridad = Path.Combine(Carpeta(db),
-            $"{Base(db)}_antes-de-restaurar_{ahora.ToString(FormatoFecha, CultureInfo.InvariantCulture)}.db");
-        Crear(db, seguridad);
+        var seguridad = Path.Combine(Carpeta(rutaDb),
+            $"{Base(rutaDb)}_antes-de-restaurar_{ahora.ToString(FormatoFecha, CultureInfo.InvariantCulture)}.db");
+        Crear(rutaDb, seguridad);
 
         using (var origen  = new SqliteConnection($"Data Source={archivo};Mode=ReadOnly;Pooling=False"))
-        using (var destino = new SqliteConnection($"Data Source={db.RutaArchivo}"))
+        using (var destino = new SqliteConnection($"Data Source={rutaDb}"))
         {
             origen.Open();
             destino.Open();
@@ -151,4 +151,12 @@ public static class CopiasDeSeguridad
         SqliteConnection.ClearAllPools();
         return seguridad;
     }
+
+    // ── Atajos para la base abierta ───────────────────────────────────────────
+    public static string  Carpeta(AppDatabase db) => Carpeta(db.RutaArchivo);
+    public static void    Crear(AppDatabase db, string destino) => Crear(db.RutaArchivo, destino);
+    public static string? CopiaAutomatica(AppDatabase db, DateTime ahora) => CopiaAutomatica(db.RutaArchivo, ahora);
+    public static List<FileInfo> Automaticas(AppDatabase db) => Automaticas(db.RutaArchivo);
+    public static DateTime? UltimaAutomatica(AppDatabase db) => UltimaAutomatica(db.RutaArchivo);
+    public static string  Restaurar(AppDatabase db, string archivo, DateTime ahora) => Restaurar(db.RutaArchivo, archivo, ahora);
 }
