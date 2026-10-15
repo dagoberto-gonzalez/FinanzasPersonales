@@ -26,6 +26,15 @@ public partial class App : Application
 
         QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        // La versión de desarrollo usa otra base (ver AppDatabase.EsDesarrollo): que se note.
+        if (AppDatabase.EsDesarrollo)
+            EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent,
+                new RoutedEventHandler((s, _) =>
+                {
+                    var w = (Window)s;
+                    if (!w.Title.EndsWith(" · DESARROLLO")) w.Title += " · DESARROLLO";
+                }));
+
         _db = new AppDatabase();
         // Antes de saber quién entra: el último tema usado en este equipo.
         Temas.Aplicar(_db.ObtenerTemaDelEquipo());

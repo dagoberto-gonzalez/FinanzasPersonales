@@ -80,7 +80,10 @@ via `ExpandirGrupo()`.
 
 ## Database
 
-SQLite file lives in `%APPDATA%\FinanzasPersonales\finanzas.db`. `AppDatabase` opens a new
+SQLite file lives in `%APPDATA%\FinanzasPersonales\finanzas.db` — **Release builds only** (the
+installer). Debug builds (`dotnet run`, Visual Studio) use `finanzas-dev.db` beside it and add
+" · DESARROLLO" to every window title (`AppDatabase.EsDesarrollo`), so testing while coding never
+touches real data. `AppDatabase` opens a new
 connection per operation (no connection pooling / EF Core) and runs idempotent
 `CREATE TABLE IF NOT EXISTS` + ad-hoc column/table migrations on startup. Key tables:
 
