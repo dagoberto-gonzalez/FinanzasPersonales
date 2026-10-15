@@ -13,11 +13,27 @@ public class AppDatabase
     public string RutaArchivo { get; }
 
     /// <summary>
+    /// <c>true</c> en una compilación Debug (Visual Studio, <c>dotnet run</c>): usa su propia
+    /// base, <c>finanzas-dev.db</c>. La versión instalada se publica en Release y usa
+    /// <c>finanzas.db</c>, así que probar mientras se programa nunca toca los datos reales.
+    /// </summary>
+    public const bool EsDesarrollo =
+#if DEBUG
+        true;
+#else
+        false;
+#endif
+
+    /// <summary>Nombre del archivo por defecto: el real o el de desarrollo.</summary>
+    public const string NombreArchivo = EsDesarrollo ? "finanzas-dev.db" : "finanzas.db";
+
+    /// <summary>
     /// Abre (o crea) la base de datos.
     /// </summary>
     /// <param name="dbPath">
-    /// Ruta completa del archivo .db. Si es <c>null</c> se usa la ubicación de producción
-    /// (<c>%APPDATA%\FinanzasPersonales\finanzas.db</c>). Las pruebas pasan una ruta temporal.
+    /// Ruta completa del archivo .db. Si es <c>null</c> se usa
+    /// <c>%APPDATA%\FinanzasPersonales\</c> + <see cref="NombreArchivo"/>. Las pruebas pasan una
+    /// ruta temporal.
     /// </param>
     public AppDatabase(string? dbPath = null)
     {
@@ -27,7 +43,7 @@ public class AppDatabase
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 "FinanzasPersonales");
             Directory.CreateDirectory(dir);
-            dbPath = Path.Combine(dir, "finanzas.db");
+            dbPath = Path.Combine(dir, NombreArchivo);
         }
         else
         {

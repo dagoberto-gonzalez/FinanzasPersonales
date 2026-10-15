@@ -7,7 +7,7 @@
 ;    dotnet publish ..\FinanzasPersonales.csproj -p:PublishProfile=win-x64-installer
 ; ============================================================
 
-#define AppName      "Finanzas Personales"
+#define AppName      "DMT Finance"
 #define AppVersion   "1.0.0"
 #define AppExe       "FinanzasPersonales.exe"
 #define PublishDir   "..\publish"
@@ -18,7 +18,7 @@ AppId={{A3F7C2D1-8E4B-4F19-9A2C-5D6E7F8A9B0C}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher=FinanzasPersonales
+AppPublisher=Dagoberto González
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
@@ -34,8 +34,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 UninstallDisplayName={#AppName}
 CloseApplications=yes
-; Si tienes un icono .ico descomenta la siguiente línea:
-; SetupIconFile=..\Resources\app.ico
+; Icono del instalador y del desinstalador en "Aplicaciones instaladas"
+SetupIconFile=..\Assets\dmt-logo.ico
+UninstallDisplayIcon={app}\{#AppExe}
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"

@@ -8,6 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>FinanzasPersonales</RootNamespace>
     <AssemblyName>FinanzasPersonales</AssemblyName>
+    <!-- Icono del .exe: escritorio, menú Inicio y barra de tareas. -->
+    <ApplicationIcon>Assets\dmt-logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Excluir herramientas auxiliares y pruebas del build principal -->

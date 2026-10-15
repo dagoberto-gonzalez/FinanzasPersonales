@@ -1,9 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
-title Compilando instalador de Finanzas Personales
+title Compilando instalador de DMT Finance
 
 echo ================================================
-echo  Finanzas Personales — Build del instalador
+echo  DMT Finance — Build del instalador
 echo ================================================
 echo.
 

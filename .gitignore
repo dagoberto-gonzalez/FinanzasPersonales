@@ -5,3 +5,7 @@
 bin/
 obj/
 .vs/
+
+# Salida de build-installer.bat (se regenera)
+publish/
+Installer/Output/
