@@ -8,7 +8,7 @@
 ; ============================================================
 
 #define AppName      "DMT Finance"
-#define AppVersion   "1.0.0"
+#define AppVersion   "1.1.0"
 #define AppExe       "FinanzasPersonales.exe"
 #define PublishDir   "..\publish"
 #define OutputDir    "..\Installer\Output"
