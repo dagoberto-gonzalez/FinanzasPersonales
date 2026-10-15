@@ -196,6 +196,38 @@
                 </StackPanel>
             </Border>
 
+            <!-- ── Copias de seguridad ── -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Copias de seguridad" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Foreground="{DynamicResource TextMutedBrush}"
+                               FontSize="12" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Text="Cada día, al abrir la aplicación, se guarda sola una copia de todos los datos (se conservan las últimas 30). Esas copias están en este mismo equipo: para protegerte si se daña o se pierde, guarda de vez en cuando una copia fuera de él, en un USB, OneDrive o tu correo."/>
+
+                    <TextBlock Text="{Binding CopiasResumen}" FontSize="13" Margin="0,0,0,14"/>
+
+                    <WrapPanel>
+                        <Button Content="Guardar copia en…"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding GuardarCopiaCommand}"
+                                Padding="20,10" Margin="0,0,10,8"/>
+                        <Button Content="Abrir carpeta de copias"
+                                Style="{StaticResource SecondaryButton}"
+                                Command="{Binding AbrirCarpetaCopiasCommand}"
+                                Padding="20,10" Margin="0,0,10,8"/>
+                        <Button Content="Restaurar una copia…"
+                                Style="{StaticResource DangerButton}"
+                                Command="{Binding RestaurarCopiaCommand}"
+                                Padding="20,10" FontSize="13" Margin="0,0,0,8"/>
+                    </WrapPanel>
+
+                    <TextBlock Text="{Binding CopiasMensaje}"
+                               Foreground="{Binding CopiasMensajeColor}"
+                               FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Visibility="{Binding CopiasMensajeVisibility}"/>
+                </StackPanel>
+            </Border>
+
             <!-- ── Diagnóstico de integridad ── -->
             <Border Style="{StaticResource Card}" Margin="0,0,0,20">
                 <StackPanel>

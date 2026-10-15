@@ -80,7 +80,41 @@ public class AdminViewModel : BaseViewModel
     public Visibility DiagnosticoListaVisibility =>
         Problemas.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
+    // ── Copias de seguridad ───────────────────────────────────────────────────
+    private string _copiasResumen = string.Empty;
+    public string CopiasResumen
+    {
+        get => _copiasResumen;
+        private set { _copiasResumen = value; OnPropertyChanged(); }
+    }
+
+    private string _copiasMensaje = string.Empty;
+    private bool   _copiasOk;
+    public string CopiasMensaje
+    {
+        get => _copiasMensaje;
+        private set
+        {
+            _copiasMensaje = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(CopiasMensajeColor));
+            OnPropertyChanged(nameof(CopiasMensajeVisibility));
+        }
+    }
+    public string CopiasMensajeColor => _copiasOk ? Temas.Actual.Green : Temas.Actual.Red;
+    public Visibility CopiasMensajeVisibility =>
+        string.IsNullOrEmpty(_copiasMensaje) ? Visibility.Collapsed : Visibility.Visible;
+
+    private void MensajeCopias(string texto, bool ok)
+    {
+        _copiasOk = ok;
+        CopiasMensaje = texto;
+    }
+
     // ── Comandos ──────────────────────────────────────────────────────────────
+    public ICommand GuardarCopiaCommand  { get; }
+    public ICommand AbrirCarpetaCopiasCommand { get; }
+    public ICommand RestaurarCopiaCommand { get; }
     public ICommand ToggleActivoCommand  { get; }
     public ICommand EliminarUsuarioCommand { get; }
     public ICommand GuardarConfigCommand { get; }
@@ -93,7 +127,88 @@ public class AdminViewModel : BaseViewModel
         EliminarUsuarioCommand = new RelayCommand<Usuario>(EliminarUsuario);
         GuardarConfigCommand   = new RelayCommand(GuardarConfig);
         EjecutarDiagnosticoCommand = new RelayCommand(EjecutarDiagnostico);
+        GuardarCopiaCommand        = new RelayCommand(GuardarCopia);
+        AbrirCarpetaCopiasCommand  = new RelayCommand(AbrirCarpetaCopias);
+        RestaurarCopiaCommand      = new RelayCommand(RestaurarCopia);
         Cargar();
+    }
+
+    private void CargarResumenCopias()
+    {
+        var copias = CopiasDeSeguridad.Automaticas(_db);
+        var ultima = CopiasDeSeguridad.UltimaAutomatica(_db);
+        CopiasResumen = ultima is null
+            ? "Todavía no hay copias automáticas."
+            : $"Última copia automática: {ultima:dd/MM/yyyy HH:mm} · {copias.Count} guardada{(copias.Count == 1 ? "" : "s")}";
+    }
+
+    private void GuardarCopia()
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title      = "Guardar copia de seguridad",
+            FileName   = $"DMT Finance {DateTime.Now:yyyy-MM-dd}.db",
+            DefaultExt = ".db",
+            Filter     = "Copia de DMT Finance (*.db)|*.db"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            CopiasDeSeguridad.Crear(_db, dlg.FileName);
+            MensajeCopias($"Copia guardada en {dlg.FileName}", ok: true);
+        }
+        catch (Exception ex)
+        {
+            MensajeCopias($"No se pudo guardar la copia: {ex.Message}", ok: false);
+        }
+    }
+
+    private void AbrirCarpetaCopias()
+    {
+        var carpeta = CopiasDeSeguridad.Carpeta(_db);
+        System.IO.Directory.CreateDirectory(carpeta);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(carpeta) { UseShellExecute = true });
+    }
+
+    private void RestaurarCopia()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title            = "Elegir la copia que se va a restaurar",
+            InitialDirectory = CopiasDeSeguridad.Carpeta(_db),
+            Filter           = "Copia de DMT Finance (*.db)|*.db"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        var motivo = CopiasDeSeguridad.MotivoNoRestaurable(dlg.FileName);
+        if (motivo is not null)
+        {
+            MensajeCopias(motivo, ok: false);
+            return;
+        }
+
+        var res = MessageBox.Show(
+            $"Se reemplazarán TODOS los datos actuales, de todos los usuarios, por los de esta copia:\n\n" +
+            $"{System.IO.Path.GetFileName(dlg.FileName)}\n\n" +
+            "Antes se guardará una copia de lo que hay ahora, por si necesitas volver atrás.\n" +
+            "Al terminar, la aplicación se cerrará y tendrás que abrirla de nuevo.\n\n¿Continuar?",
+            "Restaurar copia de seguridad", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (res != MessageBoxResult.Yes) return;
+
+        try
+        {
+            var seguridad = CopiasDeSeguridad.Restaurar(_db, dlg.FileName, DateTime.Now);
+            MessageBox.Show(
+                "Copia restaurada. La aplicación se cerrará ahora; ábrela de nuevo.\n\n" +
+                $"Lo que había antes quedó guardado en:\n{seguridad}",
+                "Restaurar copia de seguridad", MessageBoxButton.OK, MessageBoxImage.Information);
+            Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            MensajeCopias($"No se pudo restaurar: {ex.Message}", ok: false);
+        }
     }
 
     private void EjecutarDiagnostico()
@@ -125,6 +240,7 @@ public class AdminViewModel : BaseViewModel
 
         Moneda      = _db.ObtenerConfig("moneda", "₡");
         MaxUsuarios = _db.ObtenerConfig("max_usuarios", "20");
+        CargarResumenCopias();
     }
 
     private void ToggleActivo(Usuario? u)

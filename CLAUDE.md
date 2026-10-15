@@ -83,7 +83,14 @@ via `ExpandirGrupo()`.
 SQLite file lives in `%APPDATA%\FinanzasPersonales\finanzas.db` — **Release builds only** (the
 installer). Debug builds (`dotnet run`, Visual Studio) use `finanzas-dev.db` beside it and add
 " · DESARROLLO" to every window title (`AppDatabase.EsDesarrollo`), so testing while coding never
-touches real data. `AppDatabase` opens a new
+touches real data.
+
+**Backups** (`Services/CopiasDeSeguridad`): on startup, once a day, a copy goes to `Copias\` beside
+the database as `{finanzas|finanzas-dev}_yyyy-MM-dd_HHmmss.db`; only files matching that pattern are
+pruned (last 30 kept). Admin → Copias de seguridad saves a copy elsewhere and restores one —
+restoring first saves the current data as `…_antes-de-restaurar_…db`, then the app shuts down so
+migrations run on the restored file. Always copy with SQLite's backup API, never `File.Copy`: a
+copy taken mid-write is corrupt. `AppDatabase` opens a new
 connection per operation (no connection pooling / EF Core) and runs idempotent
 `CREATE TABLE IF NOT EXISTS` + ad-hoc column/table migrations on startup. Key tables:
 
