@@ -36,6 +36,11 @@ public partial class App : Application
                 }));
 
         _db = new AppDatabase();
+
+        // Copia del día, antes de que nadie toque nada. Si falla (disco lleno, permisos) la
+        // aplicación sigue: el Panel Admin muestra la fecha de la última copia.
+        try { CopiasDeSeguridad.CopiaAutomatica(_db, DateTime.Now); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Copia automática: {ex.Message}"); }
         // Antes de saber quién entra: el último tema usado en este equipo.
         Temas.Aplicar(_db.ObtenerTemaDelEquipo());
         MostrarLogin();
