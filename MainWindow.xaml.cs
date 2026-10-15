@@ -36,6 +36,8 @@ public partial class MainWindow : Window
         _uid = SessionService.UsuarioId;
 
         TxtUsuario.Text = SessionService.NombreUsuario;
+        var v = typeof(MainWindow).Assembly.GetName().Version;
+        TxtVersion.Text = v is null ? "" : $"v{v.Major}.{v.Minor}.{v.Build}";
 
         if (SessionService.EsAdmin)
         {

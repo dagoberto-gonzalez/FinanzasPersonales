@@ -398,7 +398,7 @@
                                        Foreground="{DynamicResource RedBrush}"/>
                         </StackPanel>
                     </Button>
-                    <TextBlock Text="v3.0.0"
+                    <TextBlock x:Name="TxtVersion"
                                Foreground="{DynamicResource TextMutedBrush}"
                                FontSize="11" HorizontalAlignment="Center"
                                Margin="0,6,0,0"/>
