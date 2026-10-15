@@ -164,7 +164,7 @@ public class TipoCategoriaTests
         vm.EsIngreso = true;
         vm.EsGasto   = true;
 
-        var esperado = t.Db.ObtenerCategorias(t.UsuarioId, Categoria.TipoGasto).Where(c => c != "Tarjeta");
+        var esperado = t.Db.ObtenerCategorias(t.UsuarioId, Categoria.TipoGasto).Where(c => !AppDatabase.EsCategoriaAutomatica(c));
         Assert.Equal(esperado, vm.CategoriasForm);
     }
 

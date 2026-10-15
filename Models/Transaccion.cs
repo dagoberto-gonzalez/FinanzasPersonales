@@ -19,15 +19,24 @@ public class Transaccion
 
     public int?     CuentaId         { get; set; }
 
+    /// <summary>
+    /// Las dos mitades de una transferencia entre cuentas (o con el efectivo) comparten este
+    /// número: la salida del origen y la entrada al destino. El dinero sólo cambia de lugar.
+    /// </summary>
+    public int?     TransferenciaId  { get; set; }
+
+    public bool EsTransferencia => TransferenciaId.HasValue;
+
     // ── Los dos ejes (decisión D2) ────────────────────────────────────────────
     // Un movimiento puede afectar a lo que gastaste, a lo que te queda, o a ambos.
     // Confundirlos en un único número era el origen de las incoherencias entre pantallas.
 
     /// <summary>
     /// Cuenta como gasto o ingreso del período: alimenta categorías, presupuesto y reportes.
-    /// Pagar la tarjeta no cuenta — ese gasto ya se registró al comprar.
+    /// Pagar la tarjeta no cuenta — ese gasto ya se registró al comprar. Una transferencia
+    /// tampoco: pasar dinero de una cuenta a otra no es ni gastarlo ni ganarlo.
     /// </summary>
-    public bool AfectaPresupuesto => PagoDeTarjetaId is null;
+    public bool AfectaPresupuesto => PagoDeTarjetaId is null && TransferenciaId is null;
 
     /// <summary>
     /// Mueve dinero real: alimenta saldos de cuenta y el disponible.

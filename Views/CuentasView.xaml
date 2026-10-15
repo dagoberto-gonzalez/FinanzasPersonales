@@ -74,12 +74,84 @@
                 </StackPanel>
             </Border>
 
+            <!-- ── Transferir entre cuentas ──────────────────────────────────────
+                 Dos movimientos enlazados: no cuentan como gasto ni como ingreso. -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,24">
+                <StackPanel>
+                    <TextBlock Text="Transferir entre cuentas"
+                               FontSize="15" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Text="Mueve dinero de una cuenta a otra, o entre una cuenta y el efectivo. No cuenta como gasto ni como ingreso."
+                               Foreground="{StaticResource TextMutedBrush}" FontSize="11"
+                               TextWrapping="Wrap" Margin="0,0,0,12"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Desde" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,5"/>
+                            <ComboBox ItemsSource="{Binding OpcionesTransferencia}"
+                                      SelectedItem="{Binding TransOrigen}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Hacia" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,5"/>
+                            <ComboBox ItemsSource="{Binding OpcionesTransferencia}"
+                                      SelectedItem="{Binding TransDestino}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Monto" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding TransMonto, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="₡ 0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="6">
+                            <TextBlock Text="Fecha" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,5"/>
+                            <DatePicker SelectedDate="{Binding TransFecha}" FirstDayOfWeek="Monday"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="8">
+                            <TextBlock Text="Nota (opcional)" Foreground="{StaticResource TextMutedBrush}"
+                                       FontSize="12" Margin="0,0,0,5"/>
+                            <TextBox Text="{Binding TransNota, UpdateSourceTrigger=PropertyChanged}"
+                                     Tag="Ej. ahorro del mes"/>
+                        </StackPanel>
+                        <Button Grid.Column="10"
+                                Content="Transferir"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding TransferirCommand}"
+                                VerticalAlignment="Bottom"
+                                Padding="20,11"/>
+                    </Grid>
+
+                    <TextBlock Text="{Binding TransError}"
+                               Foreground="{StaticResource RedBrush}"
+                               FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
+                               Visibility="{Binding TransErrorVisibility}"/>
+                    <TextBlock Text="{Binding TransOk}"
+                               Foreground="{StaticResource GreenBrush}"
+                               FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
+                               Visibility="{Binding TransOkVisibility}"/>
+                </StackPanel>
+            </Border>
+
             <!-- ── Lista + edición ───────────────────────────────────────────── -->
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="16"/>
-                    <ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Tabla de cuentas -->
@@ -88,21 +160,42 @@
                               SelectedItem="{Binding Seleccionada}"
                               SelectionMode="Single"
                               Margin="0">
+                        <!-- Reemplaza el RowStyle general de App.xaml (por eso repite sus dos
+                             triggers) para añadir la fila Efectivo: no es una cuenta guardada,
+                             así que no se puede seleccionar ni editar. -->
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#2D2D4A"/>
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#2D1F5E"/>
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding EsEfectivo}" Value="True">
+                                        <Setter Property="IsHitTestVisible" Value="False"/>
+                                        <Setter Property="Focusable"        Value="False"/>
+                                        <Setter Property="FontStyle"        Value="Italic"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
                         <DataGrid.Columns>
 
                             <DataGridTextColumn Header="NOMBRE"
                                                 Binding="{Binding Nombre}"
-                                                Width="*"/>
+                                                Width="*" MinWidth="120"/>
 
                             <DataGridTextColumn Header="TIPO"
                                                 Binding="{Binding Tipo}"
-                                                Width="120"/>
+                                                Width="140"/>
 
                             <DataGridTextColumn Header="BANCO"
                                                 Binding="{Binding BancoDisplay}"
-                                                Width="160"/>
+                                                Width="80"/>
 
-                            <DataGridTemplateColumn Header="SALDO" Width="120">
+                            <DataGridTemplateColumn Header="SALDO" Width="105">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding SaldoDisplay}"
@@ -116,12 +209,12 @@
                             <!-- D5: lo reservado en metas sigue en la cuenta; LIBRE es lo que no tiene destino. -->
                             <DataGridTextColumn Header="EN METAS"
                                                 Binding="{Binding ApartadoDisplay}"
-                                                Width="110"/>
+                                                Width="85"/>
                             <DataGridTextColumn Header="LIBRE"
                                                 Binding="{Binding LibreDisplay}"
-                                                Width="110"/>
+                                                Width="105"/>
 
-                            <DataGridTemplateColumn Header="ESTADO" Width="90">
+                            <DataGridTemplateColumn Header="ESTADO" Width="70">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Border CornerRadius="4" Padding="6,2"
@@ -132,6 +225,10 @@
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding Activa}" Value="False">
                                                             <Setter Property="Background" Value="#3A3A4A"/>
+                                                        </DataTrigger>
+                                                        <!-- El efectivo no se activa ni desactiva. -->
+                                                        <DataTrigger Binding="{Binding EsEfectivo}" Value="True">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -159,7 +256,8 @@
                 </Border>
 
                 <!-- Panel edición (visible al seleccionar) -->
-                <Border Grid.Column="2" Style="{StaticResource Card}"
+                <!-- Columnas Auto: oculto, el panel no reserva espacio y la tabla usa todo el ancho. -->
+                <Border Grid.Column="2" Style="{StaticResource Card}" Width="320" Margin="16,0,0,0"
                         Visibility="{Binding HaySeleccion, Converter={StaticResource BoolToVis}}">
                     <StackPanel>
                         <TextBlock Text="Editar cuenta"
