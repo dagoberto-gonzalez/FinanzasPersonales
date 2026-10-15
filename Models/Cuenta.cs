@@ -1,3 +1,4 @@
+using FinanzasPersonales.Services;
 using System.Windows.Media;
 
 namespace FinanzasPersonales.Models;
@@ -47,7 +48,7 @@ public class Cuenta
     public string BancoDisplay => string.IsNullOrWhiteSpace(Banco) ? "—" : Banco;
     public string SaldoDisplay => $"₡{SaldoActual:N0}";
 
-    private static readonly Brush _verde = new SolidColorBrush(Color.FromRgb(0xA6, 0xE3, 0xA1));
-    private static readonly Brush _rojo  = new SolidColorBrush(Color.FromRgb(0xF3, 0x8B, 0xA8));
+    private static Brush _verde => Temas.Pincel(Temas.Actual.Green);
+    private static Brush _rojo  => Temas.Pincel(Temas.Actual.Red);
     public Brush SaldoBrush => SaldoActual >= 0 ? _verde : _rojo;
 }

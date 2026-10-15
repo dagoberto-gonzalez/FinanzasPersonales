@@ -6,7 +6,7 @@
         Width="1340" Height="820"
         MinWidth="1100" MinHeight="680"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BgBrush}">
+        Background="{DynamicResource BgBrush}">
 
     <Window.Resources>
         <!-- ── Grupo de navegación colapsable ─────────────────────────────── -->
@@ -42,13 +42,13 @@
                                                 <TextBlock x:Name="HeaderText"
                                                            Grid.Column="0"
                                                            Text="{TemplateBinding Content}"
-                                                           Foreground="#A8B3CF"
+                                                           Foreground="{DynamicResource TextSoftBrush}"
                                                            FontSize="11" FontWeight="SemiBold"
                                                            VerticalAlignment="Center"/>
                                                 <Path x:Name="Chevron"
                                                       Grid.Column="1"
                                                       Data="M 0 0 L 5 5 L 10 0"
-                                                      Stroke="#A8B3CF"
+                                                      Stroke="{DynamicResource TextSoftBrush}"
                                                       StrokeThickness="2"
                                                       Margin="8,0,0,0"
                                                       VerticalAlignment="Center"
@@ -62,9 +62,9 @@
                                         <ControlTemplate.Triggers>
                                             <!-- Hover: texto y flecha en morado claro + fondo sutil -->
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="HeaderBd"   Property="Background"  Value="#22183A"/>
-                                                <Setter TargetName="HeaderText" Property="Foreground"  Value="{StaticResource AccentLightBrush}"/>
-                                                <Setter TargetName="Chevron"    Property="Stroke"      Value="{StaticResource AccentLightBrush}"/>
+                                                <Setter TargetName="HeaderBd"   Property="Background"  Value="{DynamicResource NavHoverBrush}"/>
+                                                <Setter TargetName="HeaderText" Property="Foreground"  Value="{DynamicResource AccentLightBrush}"/>
+                                                <Setter TargetName="Chevron"    Property="Stroke"      Value="{DynamicResource AccentLightBrush}"/>
                                             </Trigger>
                                             <!-- Chevron: girar al expandir (IsChecked == IsExpanded) -->
                                             <Trigger Property="IsChecked" Value="True">
@@ -158,8 +158,8 @@
 
         <!-- ── Barra lateral ──────────────────────────────────────────────── -->
         <Border Grid.Column="0"
-                Background="{StaticResource SurfaceBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+                Background="{DynamicResource SurfaceBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,1,0">
             <Grid>
                 <Grid.RowDefinitions>
@@ -173,7 +173,7 @@
                     <!-- Logo DMT Finance -->
                     <Viewbox Width="38" Height="38">
                         <Canvas Width="64" Height="64">
-                            <Rectangle Width="64" Height="64" RadiusX="14" RadiusY="14" Fill="#7C3AED"/>
+                            <Rectangle Width="64" Height="64" RadiusX="14" RadiusY="14" Fill="#0EA5E9"/>
                             <Rectangle Canvas.Left="9"  Canvas.Top="43" Width="13" Height="12" RadiusX="2.5" RadiusY="2.5" Fill="#66FFFFFF"/>
                             <Rectangle Canvas.Left="26" Canvas.Top="31" Width="13" Height="24" RadiusX="2.5" RadiusY="2.5" Fill="#A6FFFFFF"/>
                             <Rectangle Canvas.Left="43" Canvas.Top="17" Width="13" Height="38" RadiusX="2.5" RadiusY="2.5" Fill="White"/>
@@ -189,19 +189,19 @@
                                Margin="0,8,0,2"/>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="Hola, "
-                                   Foreground="{StaticResource TextMutedBrush}"
+                                   Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="12"/>
                         <TextBlock x:Name="TxtUsuario"
-                                   Foreground="{StaticResource AccentLightBrush}"
+                                   Foreground="{DynamicResource AccentLightBrush}"
                                    FontSize="12" FontWeight="SemiBold"/>
                     </StackPanel>
                     <!-- Badge de rol -->
                     <Border x:Name="BadgeAdmin"
                             CornerRadius="4" Padding="6,2" Margin="0,4,0,0"
-                            Background="#3D2A6E" HorizontalAlignment="Left"
+                            Background="{DynamicResource SelectedStrongBrush}" HorizontalAlignment="Left"
                             Visibility="Collapsed">
                         <TextBlock Text="ADMIN" FontSize="10" FontWeight="Bold"
-                                   Foreground="{StaticResource AccentLightBrush}"/>
+                                   Foreground="{DynamicResource AccentLightBrush}"/>
                     </Border>
                 </StackPanel>
 
@@ -368,6 +368,17 @@
                                         <TextBlock Text="  Panel Admin" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
+                                <!-- Alterna entre los dos temas; el texto dice a cuál se cambia. -->
+                                <Button x:Name="BtnTema"
+                                        Style="{StaticResource NavButton}"
+                                        Click="BtnTema_Click"
+                                        Margin="0,2,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock x:Name="TxtTemaIcono" FontSize="15" FontFamily="Segoe UI Emoji"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtTema" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
                         </Expander>
 
@@ -382,13 +393,13 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#x1F6AA;" FontSize="15" FontFamily="Segoe UI Emoji"
                                        VerticalAlignment="Center"
-                                       Foreground="{StaticResource RedBrush}"/>
+                                       Foreground="{DynamicResource RedBrush}"/>
                             <TextBlock Text="  Cerrar sesión" VerticalAlignment="Center"
-                                       Foreground="{StaticResource RedBrush}"/>
+                                       Foreground="{DynamicResource RedBrush}"/>
                         </StackPanel>
                     </Button>
                     <TextBlock Text="v3.0.0"
-                               Foreground="{StaticResource TextMutedBrush}"
+                               Foreground="{DynamicResource TextMutedBrush}"
                                FontSize="11" HorizontalAlignment="Center"
                                Margin="0,6,0,0"/>
                 </StackPanel>

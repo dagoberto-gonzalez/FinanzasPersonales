@@ -17,8 +17,8 @@ namespace FinanzasPersonales.ViewModels;
 /// </summary>
 public class MetaAhorroVm : BaseViewModel
 {
-    private static readonly Brush BrushVerde  = new SolidColorBrush(Color.FromRgb(0xA6, 0xE3, 0xA1));
-    private static readonly Brush BrushAccent = new SolidColorBrush(Color.FromRgb(0x9F, 0x67, 0xFA));
+    private static Brush BrushVerde  => Temas.Pincel(Temas.Actual.Green);
+    private static Brush BrushAccent => Temas.Pincel(Temas.Actual.AccentLight);
 
     private readonly MetasViewModel _parent;
 

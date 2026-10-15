@@ -1,7 +1,7 @@
 <UserControl x:Class="FinanzasPersonales.Views.CuentasView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="{StaticResource BgBrush}">
+             Background="{DynamicResource BgBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
     </UserControl.Resources>
@@ -11,7 +11,7 @@
 
             <TextBlock Text="Cuentas" FontSize="26" FontWeight="Bold" Margin="0,0,0,6"/>
             <TextBlock Text="Registra tus cuentas bancarias y métodos de pago."
-                       Foreground="{StaticResource TextMutedBrush}" FontSize="13" Margin="0,0,0,24"/>
+                       Foreground="{DynamicResource TextMutedBrush}" FontSize="13" Margin="0,0,0,24"/>
 
             <!-- ── Formulario nueva cuenta ────────────────────────────────────── -->
             <Border Style="{StaticResource Card}" Margin="0,0,0,24">
@@ -32,28 +32,28 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="Nombre" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Nombre" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding NuevaNombre, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="Ej. BAC Débito, Banco Nacional"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="2">
-                            <TextBlock Text="Tipo" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Tipo" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <ComboBox ItemsSource="{Binding Tipos}"
                                       SelectedItem="{Binding NuevoTipo}"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="4">
-                            <TextBlock Text="Banco (opcional)" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Banco (opcional)" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding NuevoBanco, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="Ej. BAC San José"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="6">
-                            <TextBlock Text="Saldo inicial" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Saldo inicial" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding NuevoSaldoInicial, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="₡ 0"/>
@@ -68,7 +68,7 @@
                     </Grid>
 
                     <TextBlock Text="{Binding NuevaError}"
-                               Foreground="{StaticResource RedBrush}"
+                               Foreground="{DynamicResource RedBrush}"
                                FontSize="12" Margin="0,10,0,0"
                                Visibility="{Binding NuevaErrorVisibility}"/>
                 </StackPanel>
@@ -81,7 +81,7 @@
                     <TextBlock Text="Transferir entre cuentas"
                                FontSize="15" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <TextBlock Text="Mueve dinero de una cuenta a otra, o entre una cuenta y el efectivo. No cuenta como gasto ni como ingreso."
-                               Foreground="{StaticResource TextMutedBrush}" FontSize="11"
+                               Foreground="{DynamicResource TextMutedBrush}" FontSize="11"
                                TextWrapping="Wrap" Margin="0,0,0,12"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -99,30 +99,30 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="Desde" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Desde" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <ComboBox ItemsSource="{Binding OpcionesTransferencia}"
                                       SelectedItem="{Binding TransOrigen}"/>
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                            <TextBlock Text="Hacia" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Hacia" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <ComboBox ItemsSource="{Binding OpcionesTransferencia}"
                                       SelectedItem="{Binding TransDestino}"/>
                         </StackPanel>
                         <StackPanel Grid.Column="4">
-                            <TextBlock Text="Monto" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Monto" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding TransMonto, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="₡ 0"/>
                         </StackPanel>
                         <StackPanel Grid.Column="6">
-                            <TextBlock Text="Fecha" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Fecha" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <DatePicker SelectedDate="{Binding TransFecha}" FirstDayOfWeek="Monday"/>
                         </StackPanel>
                         <StackPanel Grid.Column="8">
-                            <TextBlock Text="Nota (opcional)" Foreground="{StaticResource TextMutedBrush}"
+                            <TextBlock Text="Nota (opcional)" Foreground="{DynamicResource TextMutedBrush}"
                                        FontSize="12" Margin="0,0,0,5"/>
                             <TextBox Text="{Binding TransNota, UpdateSourceTrigger=PropertyChanged}"
                                      Tag="Ej. ahorro del mes"/>
@@ -136,11 +136,11 @@
                     </Grid>
 
                     <TextBlock Text="{Binding TransError}"
-                               Foreground="{StaticResource RedBrush}"
+                               Foreground="{DynamicResource RedBrush}"
                                FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
                                Visibility="{Binding TransErrorVisibility}"/>
                     <TextBlock Text="{Binding TransOk}"
-                               Foreground="{StaticResource GreenBrush}"
+                               Foreground="{DynamicResource GreenBrush}"
                                FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"
                                Visibility="{Binding TransOkVisibility}"/>
                 </StackPanel>
@@ -168,10 +168,10 @@
                                 <Setter Property="Background" Value="Transparent"/>
                                 <Style.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Background" Value="#2D2D4A"/>
+                                        <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
                                     </Trigger>
                                     <Trigger Property="IsSelected" Value="True">
-                                        <Setter Property="Background" Value="#2D1F5E"/>
+                                        <Setter Property="Background" Value="{DynamicResource SelectedBrush}"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding EsEfectivo}" Value="True">
                                         <Setter Property="IsHitTestVisible" Value="False"/>
@@ -221,10 +221,10 @@
                                                 HorizontalAlignment="Left" Margin="0,4">
                                             <Border.Style>
                                                 <Style TargetType="Border">
-                                                    <Setter Property="Background" Value="#1A3B2A"/>
+                                                    <Setter Property="Background" Value="{DynamicResource GreenRowBrush}"/>
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding Activa}" Value="False">
-                                                            <Setter Property="Background" Value="#3A3A4A"/>
+                                                            <Setter Property="Background" Value="{DynamicResource BorderBrush}"/>
                                                         </DataTrigger>
                                                         <!-- El efectivo no se activa ni desactiva. -->
                                                         <DataTrigger Binding="{Binding EsEfectivo}" Value="True">
@@ -237,10 +237,10 @@
                                                        FontSize="11" FontWeight="SemiBold">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource GreenBrush}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding Activa}" Value="False">
-                                                                <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -263,30 +263,30 @@
                         <TextBlock Text="Editar cuenta"
                                    FontSize="15" FontWeight="SemiBold" Margin="0,0,0,16"/>
 
-                        <TextBlock Text="Nombre" Foreground="{StaticResource TextMutedBrush}"
+                        <TextBlock Text="Nombre" Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="12" Margin="0,0,0,5"/>
                         <TextBox Text="{Binding EditNombre, UpdateSourceTrigger=PropertyChanged}"
                                  Margin="0,0,0,12"/>
 
-                        <TextBlock Text="Tipo" Foreground="{StaticResource TextMutedBrush}"
+                        <TextBlock Text="Tipo" Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="12" Margin="0,0,0,5"/>
                         <ComboBox ItemsSource="{Binding Tipos}"
                                   SelectedItem="{Binding EditTipo}"
                                   Margin="0,0,0,12"/>
 
-                        <TextBlock Text="Banco (opcional)" Foreground="{StaticResource TextMutedBrush}"
+                        <TextBlock Text="Banco (opcional)" Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="12" Margin="0,0,0,5"/>
                         <TextBox Text="{Binding EditBanco, UpdateSourceTrigger=PropertyChanged}"
                                  Tag="Opcional"
                                  Margin="0,0,0,12"/>
 
-                        <TextBlock Text="Saldo inicial" Foreground="{StaticResource TextMutedBrush}"
+                        <TextBlock Text="Saldo inicial" Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="12" Margin="0,0,0,5"/>
                         <TextBox Text="{Binding EditSaldoInicial, UpdateSourceTrigger=PropertyChanged}"
                                  Tag="₡ 0"
                                  Margin="0,0,0,4"/>
                         <TextBlock Text="El saldo mostrado es este valor más las transacciones. Ajústalo si la cuenta no cuadra con el banco."
-                                   Foreground="{StaticResource TextMutedBrush}"
+                                   Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="11" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
                         <CheckBox Content="Cuenta activa"
@@ -294,13 +294,13 @@
                                   Margin="0,0,0,20"/>
 
                         <TextBlock Text="{Binding MensajeError}"
-                                   Foreground="{StaticResource RedBrush}"
+                                   Foreground="{DynamicResource RedBrush}"
                                    FontSize="12" Margin="0,0,0,8"
                                    Visibility="{Binding MensajeErrorVisibility}"
                                    TextWrapping="Wrap"/>
 
                         <TextBlock Text="{Binding MensajeOk}"
-                                   Foreground="{StaticResource GreenBrush}"
+                                   Foreground="{DynamicResource GreenBrush}"
                                    FontSize="12" Margin="0,0,0,8"
                                    Visibility="{Binding MensajeOkVisibility}"/>
 

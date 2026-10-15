@@ -70,9 +70,9 @@ public class AdminViewModel : BaseViewModel
     }
 
     public string DiagnosticoColor =>
-        Problemas.Any(p => p.Severidad == SeveridadProblema.Critico) ? "#F38BA8"
-        : Problemas.Count > 0                                        ? "#FAB387"
-                                                                     : "#A6E3A1";
+        Problemas.Any(p => p.Severidad == SeveridadProblema.Critico) ? Temas.Actual.Red
+        : Problemas.Count > 0                                        ? Temas.Actual.Orange
+                                                                     : Temas.Actual.Green;
 
     public Visibility DiagnosticoResumenVisibility =>
         _diagnosticoEjecutado ? Visibility.Visible : Visibility.Collapsed;

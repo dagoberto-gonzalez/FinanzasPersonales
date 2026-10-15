@@ -33,7 +33,7 @@ public class DiagnosticoAdminTests
         Assert.Empty(vm.Problemas);
         Assert.Equal(Visibility.Visible,   vm.DiagnosticoResumenVisibility);
         Assert.Equal(Visibility.Collapsed, vm.DiagnosticoListaVisibility);
-        Assert.Equal("#A6E3A1", vm.DiagnosticoColor);      // verde
+        Assert.Equal("#4ADE80", vm.DiagnosticoColor);      // verde
         Assert.Contains("Sin discrepancias", vm.DiagnosticoResumen);
     }
 
@@ -54,7 +54,7 @@ public class DiagnosticoAdminTests
 
         Assert.NotEmpty(vm.Problemas);
         Assert.Equal(Visibility.Visible, vm.DiagnosticoListaVisibility);
-        Assert.Equal("#F38BA8", vm.DiagnosticoColor);      // rojo
+        Assert.Equal("#FB7185", vm.DiagnosticoColor);      // rojo
         Assert.Contains("crítica", vm.DiagnosticoResumen);
         Assert.Contains(vm.Problemas, p => p.Severidad == SeveridadProblema.Critico);
     }
@@ -73,7 +73,7 @@ public class DiagnosticoAdminTests
 
         Assert.NotEmpty(vm.Problemas);
         Assert.DoesNotContain(vm.Problemas, p => p.Severidad == SeveridadProblema.Critico);
-        Assert.Equal("#FAB387", vm.DiagnosticoColor);      // ámbar
+        Assert.Equal("#FB923C", vm.DiagnosticoColor);      // ámbar
     }
 
     [Fact]

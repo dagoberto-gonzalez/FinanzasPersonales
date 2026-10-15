@@ -1,7 +1,7 @@
 <UserControl x:Class="FinanzasPersonales.Views.IngresosFijosView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="{StaticResource BgBrush}">
+             Background="{DynamicResource BgBrush}">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="32,28">
 
@@ -12,7 +12,7 @@
                         Style="{StaticResource SecondaryButton}" Padding="10,2"
                         Command="{Binding MesAnteriorCommand}"/>
                 <TextBlock Text="{Binding MesAnioTexto}" MinWidth="200" TextAlignment="Center"
-                           Foreground="{StaticResource TextMutedBrush}" FontSize="13"
+                           Foreground="{DynamicResource TextMutedBrush}" FontSize="13"
                            VerticalAlignment="Center" Margin="12,0"/>
                 <Button Content="›" ToolTip="Mes siguiente"
                         Style="{StaticResource SecondaryButton}" Padding="10,2"
@@ -33,20 +33,20 @@
 
                 <Border Grid.Column="0" Style="{StaticResource Card}">
                     <StackPanel>
-                        <TextBlock Text="POR RECIBIR" Foreground="{StaticResource TextMutedBrush}"
+                        <TextBlock Text="POR RECIBIR" Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="11" FontWeight="SemiBold"/>
                         <TextBlock Text="{Binding TotalPendienteTexto}"
-                                   Foreground="{StaticResource YellowBrush}"
+                                   Foreground="{DynamicResource YellowBrush}"
                                    FontSize="26" FontWeight="Bold" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <Border Grid.Column="2" Style="{StaticResource Card}">
                     <StackPanel>
-                        <TextBlock Text="RECIBIDO" Foreground="{StaticResource TextMutedBrush}"
+                        <TextBlock Text="RECIBIDO" Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="11" FontWeight="SemiBold"/>
                         <TextBlock Text="{Binding TotalRecibidoTexto}"
-                                   Foreground="{StaticResource GreenBrush}"
+                                   Foreground="{DynamicResource GreenBrush}"
                                    FontSize="26" FontWeight="Bold" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
@@ -58,7 +58,7 @@
                     <TextBlock Text="{Binding TituloFormulario}" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,16"/>
                     <!-- Editar no reescribe lo ya recibido: cada cobro es una transacción propia. -->
                     <TextBlock Text="Los cambios valen desde el próximo cobro. Lo ya recibido se corrige en Transacciones."
-                               Foreground="{StaticResource YellowBrush}" FontSize="11"
+                               Foreground="{DynamicResource YellowBrush}" FontSize="11"
                                TextWrapping="Wrap" Margin="0,-12,0,12"
                                Visibility="{Binding EditandoVisibility}"/>
                     <Grid>
@@ -108,7 +108,7 @@
                     </Grid>
 
                     <TextBlock Text="{Binding MensajeError}"
-                               Foreground="{StaticResource RedBrush}"
+                               Foreground="{DynamicResource RedBrush}"
                                FontSize="12" Margin="0,10,0,0"
                                Visibility="{Binding MensajeErrorVisibility}"/>
                 </StackPanel>
@@ -128,7 +128,7 @@
                                     <!-- Encabezado del grupo -->
                                     <TextBlock Text="{Binding Titulo}"
                                                FontSize="12" FontWeight="SemiBold"
-                                               Foreground="{StaticResource GreenBrush}"
+                                               Foreground="{DynamicResource GreenBrush}"
                                                Margin="0,0,0,8"/>
 
                                     <!-- Ítems del grupo -->
@@ -138,10 +138,10 @@
                                                 <Border Margin="0,0,0,8" CornerRadius="8" Padding="14,10">
                                                     <Border.Style>
                                                         <Style TargetType="Border">
-                                                            <Setter Property="Background" Value="#2A2D3E"/>
+                                                            <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding RecibidoEsteMes}" Value="True">
-                                                                    <Setter Property="Background" Value="#1A2A1E"/>
+                                                                    <Setter Property="Background" Value="{DynamicResource GreenRowBrush}"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -175,7 +175,7 @@
                                                         <TextBlock Grid.Column="2"
                                                                    Text="{Binding Monto, StringFormat='₡{0:N0}'}"
                                                                    FontSize="15" FontWeight="Bold"
-                                                                   Foreground="{StaticResource GreenBrush}"
+                                                                   Foreground="{DynamicResource GreenBrush}"
                                                                    VerticalAlignment="Center"
                                                                    Margin="0,0,16,0"/>
 
@@ -184,10 +184,10 @@
                                                                 VerticalAlignment="Center">
                                                             <Border.Style>
                                                                 <Style TargetType="Border">
-                                                                    <Setter Property="Background" Value="#F9E2AF22"/>
+                                                                    <Setter Property="Background" Value="{DynamicResource YellowTintBrush}"/>
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding RecibidoEsteMes}" Value="True">
-                                                                            <Setter Property="Background" Value="#A6E3A122"/>
+                                                                            <Setter Property="Background" Value="{DynamicResource GreenTintBrush}"/>
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
@@ -196,11 +196,11 @@
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
                                                                         <Setter Property="Text" Value="Pendiente"/>
-                                                                        <Setter Property="Foreground" Value="{StaticResource YellowBrush}"/>
+                                                                        <Setter Property="Foreground" Value="{DynamicResource YellowBrush}"/>
                                                                         <Style.Triggers>
                                                                             <DataTrigger Binding="{Binding RecibidoEsteMes}" Value="True">
                                                                                 <Setter Property="Text" Value="Recibido"/>
-                                                                                <Setter Property="Foreground" Value="{StaticResource GreenBrush}"/>
+                                                                                <Setter Property="Foreground" Value="{DynamicResource GreenBrush}"/>
                                                                             </DataTrigger>
                                                                         </Style.Triggers>
                                                                     </Style>
@@ -239,7 +239,7 @@
                     </ItemsControl>
 
                     <TextBlock Text="No hay ingresos fijos registrados."
-                               Foreground="{StaticResource TextMutedBrush}"
+                               Foreground="{DynamicResource TextMutedBrush}"
                                FontSize="13" Margin="0,8,0,0">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">

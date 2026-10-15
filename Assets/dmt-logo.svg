@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Background rounded square — AccentBrush #7C3AED -->
-  <rect width="64" height="64" rx="14" fill="#7C3AED"/>
+  <!-- Background rounded square — AccentBrush #0EA5E9 (paleta Océano) -->
+  <rect width="64" height="64" rx="14" fill="#0EA5E9"/>
 
   <!-- Ascending bar chart (left → right, shortest → tallest) -->
   <rect x="9"  y="43" width="13" height="12" rx="2.5" fill="#FFFFFF" fill-opacity="0.40"/>

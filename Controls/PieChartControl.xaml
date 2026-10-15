@@ -26,12 +26,12 @@
                                    RadiusX="2" RadiusY="2"
                                    VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding Label}"
-                                   Foreground="#CDD6F4"
+                                   Foreground="{DynamicResource TextBrush}"
                                    FontSize="13"
                                    Margin="8,0,0,0"
                                    VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding Percentage, StringFormat=' {0:F1}%'}"
-                                   Foreground="#6C7086"
+                                   Foreground="{DynamicResource TextMutedBrush}"
                                    FontSize="12"
                                    VerticalAlignment="Center"/>
                     </StackPanel>

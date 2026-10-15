@@ -298,13 +298,22 @@ empty list; that empty list is the exit criterion for any refactor of the money 
 - **Monto coloring in DataGrid:** done with inline `DataTrigger` on `Tipo == "Gasto"` — no converter needed.
 - **PDF exports:** `PdfExportService` (general finance report) and `PdfLaboralService` (Control Laboral payroll report) build documents with QuestPDF's fluent `Document.Create` API and save to `MyDocuments`.
 
-## Dark Theme Palette
+## Themes ("Océano" dark / light)
 
-| Key | Hex | Use |
-|---|---|---|
-| `BgBrush` | `#1E1E2E` | Window background |
-| `SurfaceBrush` | `#24273A` | Sidebar, inputs |
-| `CardBrush` | `#2A2D3E` | Cards |
-| `AccentBrush` | `#7C3AED` | Primary actions |
-| `GreenBrush` | `#A6E3A1` | Ingresos |
-| `RedBrush` | `#F38BA8` | Gastos / danger |
+Two themes, switched live from the sidebar (Cuenta → Tema claro/oscuro), saved per user in
+`Usuarios.Tema`; the last one chosen is also stored as `Configuracion('tema')`, which the login
+window uses before anyone has signed in.
+
+- **`Services/Temas.cs` is the only source of colours.** Each `Paleta` lists every named colour;
+  `Temas.Aplicar` turns it into resources (`BgBrush`, `SurfaceBrush`, `CardBrush`, `BorderBrush`,
+  `AccentBrush`, `TextBrush`, `TextMutedBrush`, `GreenBrush`, `RedBrush`, the `*TintBrush` soft
+  backgrounds, `HoverBrush`/`SelectedBrush` for rows…) and swaps MahApps between `Dark.Blue` and
+  `Light.Blue`. App.xaml no longer defines any brush.
+- **XAML must use `{DynamicResource XBrush}`**, never `StaticResource` or a literal hex: those are
+  resolved once and keep the theme the window opened with. The only literals left on purpose are
+  the logo and the yellow Dashboard alerts (dark text on yellow reads in both themes).
+- **C# that picks a colour by data** (green/red balance, budget, diagnostics, charts) reads
+  `Temas.Actual`. Those values are computed when the view is built, so `MainWindow` discards its
+  cached views on a theme change and re-shows the current section. Without WPF (tests)
+  `Temas.Actual` is the dark palette, which is why tests can assert dark hex values.
+- Hex with alpha is `#AARRGGBB` in WPF: a 22 % tint of `#4ADE80` is `#224ADE80`, not `#4ADE8022`.
