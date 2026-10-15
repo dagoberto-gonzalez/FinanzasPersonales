@@ -8,10 +8,11 @@
 ; ============================================================
 
 #define AppName      "DMT Finance"
-#define AppVersion   "1.0.0"
 #define AppExe       "FinanzasPersonales.exe"
 #define PublishDir   "..\publish"
 #define OutputDir    "..\Installer\Output"
+; La versión sale del .exe publicado (<Version> en FinanzasPersonales.csproj): un solo sitio.
+#define AppVersion   GetVersionNumbersString(AddBackslash(PublishDir) + AppExe)
 
 [Setup]
 AppId={{A3F7C2D1-8E4B-4F19-9A2C-5D6E7F8A9B0C}

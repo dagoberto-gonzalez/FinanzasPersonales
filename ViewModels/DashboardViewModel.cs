@@ -251,14 +251,17 @@ public class DashboardViewModel : BaseViewModel
     {
         var ahora  = DateTime.Now;
 
-        // ── Detectar mes anterior sin cerrar ─────────────────────────────────
-        var mesAnterior = ahora.AddMonths(-1);
-        if (!_db.MesCerrado(_uid, mesAnterior.Year, mesAnterior.Month))
+        // ── Meses sin cerrar: se ofrece el más antiguo; al cerrarlo aparece el siguiente ──
+        var pendientes = _db.MesesSinCerrar(_uid, ahora);
+        if (pendientes.Count > 0)
         {
-            var label = new DateTime(mesAnterior.Year, mesAnterior.Month, 1)
+            var (anio, mes) = pendientes[0];
+            var label = new DateTime(anio, mes, 1)
                 .ToString("MMMM yyyy", CultureInfo.GetCultureInfo("es-CR"));
-            _mesACerrar              = (mesAnterior.Year, mesAnterior.Month);
-            BannerCierreMesTexto     = $"El mes de {label} aún no ha sido cerrado. ¿Deseas cerrarlo ahora?";
+            _mesACerrar              = (anio, mes);
+            BannerCierreMesTexto     = pendientes.Count == 1
+                ? $"El mes de {label} aún no ha sido cerrado. ¿Deseas cerrarlo ahora?"
+                : $"Tienes {pendientes.Count} meses sin cerrar. El más antiguo es {label}. ¿Deseas cerrarlo ahora?";
             BannerCierreMesVisibility = Visibility.Visible;
         }
         else
