@@ -104,6 +104,7 @@ public class IngresoQuincenaTests
         vm.Cargar();
 
         Assert.Null(t.Db.IngresoDelPeriodo(t.UsuarioId, Inicio));
+        Assert.Empty(t.Db.ObtenerIngresosLaboralesDirectos(t.UsuarioId));   // no queda un ingreso sin dinero
         Assert.Equal("Pendiente", Assert.Single(vm.Historial).Ingreso);
         Assert.Equal(Visibility.Visible, vm.RegistrarIngresoVisibility);
     }

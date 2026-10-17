@@ -11,7 +11,7 @@
     <!-- Icono del .exe: escritorio, menú Inicio y barra de tareas. -->
     <ApplicationIcon>Assets\dmt-logo.ico</ApplicationIcon>
     <!-- Única fuente de la versión: el menú lateral la lee del ensamblado y el instalador del .exe. -->
-    <Version>1.1.2</Version>
+    <Version>1.1.3</Version>
   </PropertyGroup>
 
   <!-- Excluir herramientas auxiliares y pruebas del build principal -->

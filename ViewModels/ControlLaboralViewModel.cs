@@ -504,7 +504,8 @@ public class ControlLaboralViewModel : BaseViewModel
             });
         }
 
-        foreach (var d in directos.Where(d => d.PeriodoInicio is not { } pi || !cerradas.Contains(pi)))
+        // Un ingreso sin transacción (se borró desde Transacciones) ya no es dinero: no se muestra ni suma.
+        foreach (var d in directos.Where(d => d.TransaccionId is not null && (d.PeriodoInicio is not { } pi || !cerradas.Contains(pi))))
         {
             var label = d.Fecha.ToString("dd/MM/yyyy", CrCulture);
             if (!string.IsNullOrWhiteSpace(d.Descripcion))
@@ -1054,9 +1055,12 @@ public class ControlLaboralViewModel : BaseViewModel
             ? $"Período: {item.Label}\nSalario neto: ₡{item.Monto:N2}"
             : $"Fecha: {item.Label}\nMonto: ₡{item.Monto:N2}";
 
+        // Un cierre es sólo el cálculo: borrarlo reabre la quincena y no toca el ingreso registrado.
+        var efecto = item.EsCierre
+            ? "La quincena vuelve a quedar abierta. Si ya registraste su ingreso, se conserva."
+            : "También se eliminará su transacción: el dinero dejará de contar en la cuenta.";
         var res = MessageBox.Show(
-            $"¿Eliminar este {tipo}?\n\n{detalle}\n\n" +
-            "Esta acción también eliminará la transacción vinculada.",
+            $"¿Eliminar este {tipo}?\n\n{detalle}\n\n{efecto}",
             "Confirmar eliminación", MessageBoxButton.YesNo, MessageBoxImage.Warning);
 
         if (res != MessageBoxResult.Yes) return;

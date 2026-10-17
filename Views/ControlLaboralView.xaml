@@ -746,15 +746,14 @@
                               MaxHeight="340"
                               Visibility="{Binding ConHistorialVisibility}">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Fecha / Período" Binding="{Binding Label}"      Width="*" MinWidth="150"/>
-                            <DataGridTextColumn Header="Tipo"            Binding="{Binding TipoDisplay}" Width="115"/>
+                            <DataGridTextColumn Header="Fecha / Período" Binding="{Binding Label}"      Width="*" MinWidth="130"/>
                             <DataGridTextColumn Header="Bruto"           Binding="{Binding BrutoDisplay}" Width="105"/>
                             <DataGridTextColumn Header="Deducciones"     Binding="{Binding DeduccionesDisplay}" Width="105"/>
                             <DataGridTextColumn Header="Neto / Monto"    Binding="{Binding MontoDisplay}" Width="105"/>
                             <DataGridTextColumn Header="Acumulado"       Binding="{Binding BalanceDisplay}" Width="105"/>
-                            <DataGridTextColumn Header="Ingreso"         Binding="{Binding Ingreso}" Width="110"/>
-                            <DataGridTextColumn Header="Comprobante"     Binding="{Binding Comprobante}" Width="140"/>
-                            <DataGridTemplateColumn Header="Acciones" Width="160">
+                            <DataGridTextColumn Header="Ingreso"         Binding="{Binding Ingreso}" Width="95"/>
+                            <DataGridTextColumn Header="Comprobante"     Binding="{Binding Comprobante}" Width="120"/>
+                            <DataGridTemplateColumn Header="Acciones" Width="170">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <StackPanel Orientation="Horizontal">

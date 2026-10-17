@@ -1704,6 +1704,10 @@ public class AppDatabase
                 "UPDATE PagosMensuales SET Pagado=0, MetodoPago='', TransaccionId=NULL WHERE TransaccionId=$id",
                 ("$id", id));
 
+            // Lo mismo con un ingreso laboral: sin su transacción ya no es dinero que entró. La
+            // clave foránea sola lo dejaba en el historial, sumando un pago que ya no existe.
+            EjecutarNonQuery(conn, "DELETE FROM IngresoLaboralDirecto WHERE TransaccionId=$id", ("$id", id));
+
             // Una transferencia se borra entera: dejar sólo la salida sería un gasto que no
             // existió, y dejar sólo la entrada, dinero aparecido de la nada.
             EjecutarNonQuery(conn,
