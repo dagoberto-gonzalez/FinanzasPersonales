@@ -214,6 +214,10 @@ public class AppDatabase
         MigrarMetasAApartados(conn);
         if (!GetColumnas(conn, "Usuarios").Contains("Tema"))
             AddColumna(conn, "Usuarios", "Tema", "TEXT NOT NULL DEFAULT 'Oscuro'");
+        // Quincena a la que corresponde un ingreso laboral (su FechaInicio). NULL = ingresos de antes,
+        // sin quincena: se siguen mostrando como "Ingreso directo".
+        if (!GetColumnas(conn, "IngresoLaboralDirecto").Contains("PeriodoInicio"))
+            AddColumna(conn, "IngresoLaboralDirecto", "PeriodoInicio", "TEXT");
         if (!GetColumnas(conn, "Transacciones").Contains("TransferenciaId"))
         {
             // Las dos mitades de una transferencia comparten este número (ver Transferir).
@@ -1510,7 +1514,7 @@ public class AppDatabase
 
         if (origen is { Apartado: > 0 } && monto > origen.Libre)
             throw new InvalidOperationException(
-                $"En «{origen.Nombre}» hay ₡{origen.Apartado:N0} apartados en metas y sólo ₡{Math.Max(origen.Libre, 0):N0} libres. " +
+                $"En «{origen.Nombre}» hay ₡{origen.Apartado:N2} apartados en metas y sólo ₡{Math.Max(origen.Libre, 0):N2} libres. " +
                 "Libera dinero de alguna meta si quieres transferir más.");
 
         string nombreOrigen = origen?.Nombre ?? "Efectivo", nombreDestino = destino?.Nombre ?? "Efectivo";
@@ -1899,7 +1903,7 @@ public class AppDatabase
     {
         if (monto > meta.Apartado)
             throw new InvalidOperationException(
-                $"La meta sólo tiene ₡{meta.Apartado:N0} apartados.");
+                $"La meta sólo tiene ₡{meta.Apartado:N2} apartados.");
     }
 
     /// <summary>
@@ -1919,7 +1923,7 @@ public class AppDatabase
             """, ("$id", cuentaId));
         if (monto > libre)
             throw new InvalidOperationException(
-                $"En la cuenta sólo hay ₡{Math.Max(libre, 0):N0} sin destino: no se puede apartar ₡{monto:N0}.");
+                $"En la cuenta sólo hay ₡{Math.Max(libre, 0):N2} sin destino: no se puede apartar ₡{monto:N2}.");
     }
 
     private static void InsertarMovimiento(SqliteConnection conn, int metaId, decimal monto, string tipo, int? transaccionId) =>
@@ -3492,7 +3496,7 @@ public class AppDatabase
         using var conn = Abrir();
         using var cmd  = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT Id, Fecha, Monto, Descripcion, CuentaId, TransaccionId
+            SELECT Id, Fecha, Monto, Descripcion, CuentaId, TransaccionId, PeriodoInicio
             FROM IngresoLaboralDirecto
             WHERE UsuarioId=$uid
             ORDER BY Fecha DESC, Id DESC
@@ -3509,14 +3513,31 @@ public class AppDatabase
                 Monto         = (decimal)r.GetDouble(2),
                 Descripcion   = r.IsDBNull(3) ? "" : r.GetString(3),
                 CuentaId      = r.IsDBNull(4) ? null : r.GetInt32(4),
-                TransaccionId = r.IsDBNull(5) ? null : r.GetInt32(5)
+                TransaccionId = r.IsDBNull(5) ? null : r.GetInt32(5),
+                PeriodoInicio = r.IsDBNull(6) ? null : DateTime.Parse(r.GetString(6))
             });
         return list;
     }
 
+    /// <summary>
+    /// El ingreso que paga la quincena que empieza en <paramref name="periodoInicio"/>, o null.
+    /// Si su transacción se borró (desde Transacciones), la quincena vuelve a quedar sin cobrar:
+    /// el dinero ya no está registrado en ninguna parte.
+    /// </summary>
+    public IngresoLaboralDirecto? IngresoDelPeriodo(int usuarioId, DateTime periodoInicio) =>
+        ObtenerIngresosLaboralesDirectos(usuarioId)
+            .FirstOrDefault(i => i.PeriodoInicio == periodoInicio.Date && i.TransaccionId is not null);
+
+    /// <param name="periodoInicio">
+    /// Quincena que paga este ingreso. Una quincena se cobra una sola vez: un segundo ingreso para
+    /// la misma se rechaza, porque el historial y los totales lo contarían dos veces.
+    /// </param>
     public void InsertarIngresoLaboralDirecto(int usuarioId, DateTime fecha, decimal monto,
-        string descripcion, int? cuentaId)
+        string descripcion, int? cuentaId, DateTime? periodoInicio = null)
     {
+        if (periodoInicio is { } ini && IngresoDelPeriodo(usuarioId, ini) is not null)
+            throw new InvalidOperationException("Esta quincena ya tiene su ingreso registrado.");
+
         using var conn = Abrir();
         using var tr   = conn.BeginTransaction();
         try
@@ -3551,13 +3572,14 @@ public class AppDatabase
 
             // Insertar registro de ingreso directo
             EjecutarNonQuery(conn,
-                "INSERT INTO IngresoLaboralDirecto (UsuarioId, Fecha, Monto, Descripcion, CuentaId, TransaccionId) VALUES ($uid,$fecha,$monto,$desc,$cid,$tid)",
+                "INSERT INTO IngresoLaboralDirecto (UsuarioId, Fecha, Monto, Descripcion, CuentaId, TransaccionId, PeriodoInicio) VALUES ($uid,$fecha,$monto,$desc,$cid,$tid,$pi)",
                 ("$uid",   usuarioId),
                 ("$fecha", fecha.ToString("yyyy-MM-dd")),
                 ("$monto", (double)monto),
                 ("$desc",  descripcion),
                 ("$cid",   cuentaId.HasValue ? cuentaId.Value : DBNull.Value),
-                ("$tid",   tid));
+                ("$tid",   tid),
+                ("$pi",    periodoInicio?.ToString("yyyy-MM-dd")));
 
             tr.Commit();
         }

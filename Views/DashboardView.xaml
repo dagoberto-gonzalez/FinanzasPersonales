@@ -44,7 +44,7 @@
                                         </TextBlock.Style>
                                     </TextBlock>
                                     <TextBlock Text=" — " Foreground="#5C4E00" FontSize="12"/>
-                                    <TextBlock Text="{Binding Monto, StringFormat='₡{0:N0}'}"
+                                    <TextBlock Text="{Binding Monto, StringFormat='₡{0:N2}'}"
                                                Foreground="#5C4E00" FontSize="12"/>
                                 </StackPanel>
                             </DataTemplate>
@@ -75,7 +75,7 @@
                                                Foreground="#1C1A00" FontSize="12" FontWeight="SemiBold"/>
                                     <TextBlock Text=" — "
                                                Foreground="#5C4E00" FontSize="12"/>
-                                    <TextBlock Text="{Binding SaldoUsado, StringFormat='₡{0:N0} pendiente'}"
+                                    <TextBlock Text="{Binding SaldoUsado, StringFormat='₡{0:N2} pendiente'}"
                                                Foreground="#8B1A1A" FontSize="12" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </DataTemplate>
@@ -302,7 +302,7 @@
                                             </StackPanel>
 
                                             <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                                                <TextBlock Text="{Binding Monto, StringFormat='₡{0:N0}'}"
+                                                <TextBlock Text="{Binding Monto, StringFormat='₡{0:N2}'}"
                                                            FontWeight="SemiBold" FontSize="13"
                                                            HorizontalAlignment="Right">
                                                     <TextBlock.Style>

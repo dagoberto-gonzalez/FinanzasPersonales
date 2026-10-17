@@ -25,9 +25,9 @@ public class ReportesViewModel : BaseViewModel
         set { _anioSeleccionado = value; OnPropertyChanged(); CalcularResumenAnual(); }
     }
 
-    public string IngresosAnioTexto  => $"₡{_ingresosAnio:N0}";
-    public string GastosAnioTexto    => $"₡{_gastosAnio:N0}";
-    public string BalanceAnioTexto   => $"₡{(_ingresosAnio - _gastosAnio):N0}";
+    public string IngresosAnioTexto  => $"₡{_ingresosAnio:N2}";
+    public string GastosAnioTexto    => $"₡{_gastosAnio:N2}";
+    public string BalanceAnioTexto   => $"₡{(_ingresosAnio - _gastosAnio):N2}";
 
     public IReadOnlyList<int> AniosDisponibles { get; private set; } = [];
 
@@ -43,10 +43,10 @@ public class ReportesViewModel : BaseViewModel
     public int AnioB     { get => _anioB;     set { _anioB = value;     OnPropertyChanged(); CompararMeses(); } }
 
     private decimal _ingresosA, _gastosA, _ingresosB, _gastosB;
-    public string IngresosATexto => $"₡{_ingresosA:N0}";
-    public string GastosATexto   => $"₡{_gastosA:N0}";
-    public string IngresosBTexto => $"₡{_ingresosB:N0}";
-    public string GastosBTexto   => $"₡{_gastosB:N0}";
+    public string IngresosATexto => $"₡{_ingresosA:N2}";
+    public string GastosATexto   => $"₡{_gastosA:N2}";
+    public string IngresosBTexto => $"₡{_ingresosB:N2}";
+    public string GastosBTexto   => $"₡{_gastosB:N2}";
 
     public IReadOnlyList<string> NombresMeses { get; } =
         ["Enero","Febrero","Marzo","Abril","Mayo","Junio",

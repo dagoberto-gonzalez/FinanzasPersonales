@@ -484,7 +484,7 @@ public class TransaccionesViewModel : BaseViewModel
         if (!CategoriasForm.Contains(t.Categoria)) CategoriasForm.Add(t.Categoria);
         Categoria   = t.Categoria;
 
-        Monto       = t.Monto % 1 == 0 ? t.Monto.ToString("N0") : t.Monto.ToString("N2");
+        Monto       = t.Monto.ToString("N2");
         Descripcion = t.Descripcion;
         Notas       = t.Notas;
         Fecha       = t.Fecha;
@@ -498,7 +498,7 @@ public class TransaccionesViewModel : BaseViewModel
     {
         if (t is null) return;
         var res = System.Windows.MessageBox.Show(
-            $"¿Eliminar la transacción \"{t.EtiquetaDisplay}\" por ₡{t.Monto:N0}?" +
+            $"¿Eliminar la transacción \"{t.EtiquetaDisplay}\" por ₡{t.Monto:N2}?" +
             (t.EsTransferencia ? "\n\nEs una transferencia: se borran la salida y la entrada." : ""),
             "Confirmar eliminación",
             System.Windows.MessageBoxButton.YesNo,

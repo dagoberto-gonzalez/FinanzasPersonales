@@ -209,7 +209,7 @@
 
                                                         <!-- Monto -->
                                                         <TextBlock Grid.Column="2"
-                                                                   Text="{Binding Monto, StringFormat='₡{0:N0}'}"
+                                                                   Text="{Binding Monto, StringFormat='₡{0:N2}'}"
                                                                    FontSize="15" FontWeight="Bold"
                                                                    Foreground="{DynamicResource RedBrush}"
                                                                    VerticalAlignment="Center"/>

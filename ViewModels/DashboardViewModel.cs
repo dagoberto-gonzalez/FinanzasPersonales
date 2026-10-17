@@ -31,16 +31,16 @@ public class DashboardViewModel : BaseViewModel
         private set { _balanceTotal = value; OnPropertyChanged(); OnPropertyChanged(nameof(BalanceTotalTexto)); OnPropertyChanged(nameof(BalanceBrush)); }
     }
 
-    public string BalanceTotalTexto => $"₡{_balanceTotal:N0}";
+    public string BalanceTotalTexto => $"₡{_balanceTotal:N2}";
 
     private decimal _enCuentas;
     private decimal _enEfectivo;
 
     /// <summary>De dónde sale el disponible, para poder cuadrarlo con Cuentas.</summary>
-    public string DesgloseDisponibleTexto => $"En cuentas ₡{_enCuentas:N0}  ·  En efectivo ₡{_enEfectivo:N0}";
+    public string DesgloseDisponibleTexto => $"En cuentas ₡{_enCuentas:N2}  ·  En efectivo ₡{_enEfectivo:N2}";
 
     private decimal _apartadoMetas;
-    public string     ApartadoMetasTexto      => $"₡{_apartadoMetas:N0}";
+    public string     ApartadoMetasTexto      => $"₡{_apartadoMetas:N2}";
     public Visibility ApartadoMetasVisibility => _apartadoMetas > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Brush  BalanceBrush      => _balanceTotal >= 0 ? BrushVerde : BrushRojo;
 
@@ -61,7 +61,7 @@ public class DashboardViewModel : BaseViewModel
         }
     }
 
-    public string DeudaTarjetasTexto => $"₡{_deudaTarjetas:N0}";
+    public string DeudaTarjetasTexto => $"₡{_deudaTarjetas:N2}";
 
     public Visibility DeudaTarjetasVisibility =>
         _deudaTarjetas > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -71,14 +71,14 @@ public class DashboardViewModel : BaseViewModel
         get => _ingresosMes;
         private set { _ingresosMes = value; OnPropertyChanged(); OnPropertyChanged(nameof(IngresosMesTexto)); }
     }
-    public string IngresosMesTexto => $"₡{_ingresosMes:N0}";
+    public string IngresosMesTexto => $"₡{_ingresosMes:N2}";
 
     public decimal GastosMes
     {
         get => _gastosMes;
         private set { _gastosMes = value; OnPropertyChanged(); OnPropertyChanged(nameof(GastosMesTexto)); NotificarPresupuesto(); }
     }
-    public string GastosMesTexto => $"₡{_gastosMes:N0}";
+    public string GastosMesTexto => $"₡{_gastosMes:N2}";
 
     public IEnumerable<PieSlice> GastosSeries
     {
@@ -116,17 +116,17 @@ public class DashboardViewModel : BaseViewModel
     public Visibility BannerPresupuestoVisibility =>
         PresupuestoExcedido ? Visibility.Visible : Visibility.Collapsed;
     public string     PresupuestoTexto       => TienePresupuesto
-        ? $"⚠ Gastos del mes (₡{_gastosMes:N0}) superan el presupuesto (₡{_presupuesto:N0})"
+        ? $"⚠ Gastos del mes (₡{_gastosMes:N2}) superan el presupuesto (₡{_presupuesto:N2})"
         : string.Empty;
 
     /// <summary>Gastado / presupuesto. Puede pasar de 1.</summary>
     public decimal PresupuestoFraccion => TienePresupuesto ? _gastosMes / _presupuesto : 0m;
 
-    public string PresupuestoUsoTexto => $"₡{_gastosMes:N0} de ₡{_presupuesto:N0}  ·  {PresupuestoFraccion:P0}";
+    public string PresupuestoUsoTexto => $"₡{_gastosMes:N2} de ₡{_presupuesto:N2}  ·  {PresupuestoFraccion:P0}";
 
     public string PresupuestoRestanteTexto => _gastosMes <= _presupuesto
-        ? $"Te quedan ₡{_presupuesto - _gastosMes:N0}"
-        : $"Te pasaste por ₡{_gastosMes - _presupuesto:N0}";
+        ? $"Te quedan ₡{_presupuesto - _gastosMes:N2}"
+        : $"Te pasaste por ₡{_gastosMes - _presupuesto:N2}";
 
     /// <summary>Verde, amarillo desde el 80 %, rojo al pasarse.</summary>
     public string PresupuestoColor =>
@@ -166,7 +166,7 @@ public class DashboardViewModel : BaseViewModel
 
     private void EditarPresupuesto()
     {
-        PresupuestoEditado   = TienePresupuesto ? _presupuesto.ToString("N0") : "";
+        PresupuestoEditado   = TienePresupuesto ? _presupuesto.ToString("N2") : "";
         PresupuestoError     = "";
         _editandoPresupuesto = true;
         NotificarPresupuesto();
@@ -375,9 +375,9 @@ public class DashboardViewModel : BaseViewModel
             .ToString("MMMM yyyy", CultureInfo.GetCultureInfo("es-CR"));
 
         var msg = $"Cierre de {label}\n\n" +
-                  $"Ingresos:       ₡{totales.Ingresos:N0}\n" +
-                  $"Gastos:         ₡{totales.Gastos:N0}\n" +
-                  $"Balance del mes: ₡{balance:N0}\n" +
+                  $"Ingresos:       ₡{totales.Ingresos:N2}\n" +
+                  $"Gastos:         ₡{totales.Gastos:N2}\n" +
+                  $"Balance del mes: ₡{balance:N2}\n" +
                   $"Transacciones:  {totales.NumTrans}\n\n" +
                   "¿Confirmar cierre?";
 

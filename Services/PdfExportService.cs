@@ -54,9 +54,9 @@ public static class PdfExportService
                         resumen.Spacing(6);
                         resumen.Item().Row(r =>
                         {
-                            r.RelativeItem().Text($"Ingresos: ₡{ingresos:N0}").FontColor(Colors.Green.Darken1);
-                            r.RelativeItem().Text($"Gastos: ₡{gastos:N0}").FontColor(Colors.Red.Darken1);
-                            r.RelativeItem().Text($"Balance: ₡{balance:N0}")
+                            r.RelativeItem().Text($"Ingresos: ₡{ingresos:N2}").FontColor(Colors.Green.Darken1);
+                            r.RelativeItem().Text($"Gastos: ₡{gastos:N2}").FontColor(Colors.Red.Darken1);
+                            r.RelativeItem().Text($"Balance: ₡{balance:N2}")
                                 .FontColor(balance >= 0 ? Colors.Green.Darken1 : Colors.Red.Darken1);
                         });
                     });
@@ -86,11 +86,11 @@ public static class PdfExportService
                             foreach (var t in tarjetas)
                             {
                                 table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5).Text(t.Nombre);
-                                table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5).Text($"₡{t.LimiteCredito:N0}");
+                                table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5).Text($"₡{t.LimiteCredito:N2}");
                                 table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5)
-                                    .Text($"₡{t.SaldoUsado:N0}").FontColor(Colors.Red.Darken1);
+                                    .Text($"₡{t.SaldoUsado:N2}").FontColor(Colors.Red.Darken1);
                                 table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5)
-                                    .Text($"₡{t.SaldoDisponible:N0}").FontColor(Colors.Green.Darken1);
+                                    .Text($"₡{t.SaldoDisponible:N2}").FontColor(Colors.Green.Darken1);
                             }
                         });
                     }
@@ -120,7 +120,7 @@ public static class PdfExportService
                             foreach (var g in gastosFijos)
                             {
                                 table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5).Text(g.Nombre);
-                                table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5).Text($"₡{g.Monto:N0}");
+                                table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5).Text($"₡{g.Monto:N2}");
                                 table.Cell().BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Padding(5).Text(g.DiaVencimiento.ToString());
                                 var estado = g.PagadoEsteMes ? "Pagado" : g.EsVencido ? "Vencido" : "Pendiente";
                                 var color  = g.PagadoEsteMes ? Colors.Green.Darken1 : g.EsVencido ? Colors.Red.Darken1 : Colors.Orange.Darken1;
@@ -161,7 +161,7 @@ public static class PdfExportService
                             table.Cell().Background(bg).Padding(4).Text(t.EtiquetaDisplay);
                             table.Cell().Background(bg).Padding(4).Text(t.Categoria);
                             table.Cell().Background(bg).Padding(4)
-                                .Text($"₡{t.Monto:N0}")
+                                .Text($"₡{t.Monto:N2}")
                                 .FontColor(t.Tipo == "Ingreso" ? Colors.Green.Darken1 : Colors.Red.Darken1);
                             table.Cell().Background(bg).Padding(4).Text(t.Tipo);
                         }

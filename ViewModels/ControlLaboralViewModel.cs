@@ -272,6 +272,13 @@ public class ControlLaboralViewModel : BaseViewModel
     public Visibility PeriodoAbiertVisibility  { get; private set; } = Visibility.Visible;
     public string     PeriodoCerradoTexto      { get; private set; } = "";
 
+    // Registrar el ingreso no depende de cerrar: primero termina la quincena (y se cierra) y
+    // días después llega el pago. Antes el botón desaparecía al cerrar, así que había que
+    // registrar un pago que todavía no había llegado.
+    public Visibility RegistrarIngresoVisibility  { get; private set; } = Visibility.Visible;
+    public Visibility IngresoRegistradoVisibility { get; private set; } = Visibility.Collapsed;
+    public string     IngresoRegistradoTexto      { get; private set; } = "";
+
     // ── Historial ─────────────────────────────────────────────────────────────
     public string     HistorialTotalAnio     { get; private set; } = "₡0";
     public Visibility SinHistorialVisibility { get; private set; } = Visibility.Visible;
@@ -434,7 +441,7 @@ public class ControlLaboralViewModel : BaseViewModel
         ConfigDiaPago      = _diaPago  > 0 ? _diaPago.ToString()  : "15";
         ConfigDiaPago2     = _diaPago2 > 0 ? _diaPago2.ToString() : "30";
         ConfigDiaSemana    = DiaSemanaToString(_diaSemana);
-        ConfigViaticos     = _viaticos.ToString("N0");
+        ConfigViaticos     = _viaticos.ToString("N2");
         ConfigDiasPorSemana = _cfg.DiasPorSemana.ToString();
         ConfigPorcentaje    = _cfg.PorcentajeDeduccion.ToString("0.##", CultureInfo.InvariantCulture);
 
@@ -473,12 +480,19 @@ public class ControlLaboralViewModel : BaseViewModel
 
         var items = new List<HistorialLaboralItem>();
 
+        // Un ingreso ligado a una quincena cerrada va en la fila de esa quincena, no en una fila
+        // propia: contarlo aparte sumaba dos veces la misma plata al total del año.
+        var cerradas = periodos.Select(p => p.FechaInicio.Date).ToHashSet();
+
         foreach (var p in periodos)
         {
             items.Add(new HistorialLaboralItem
             {
                 EsCierre      = true,
                 Comprobante   = EstadoComprobante(p),
+                Ingreso       = directos.FirstOrDefault(d => d.PeriodoInicio == p.FechaInicio.Date && d.TransaccionId is not null) is { } cobro
+                                    ? $"✓ {cobro.Fecha:dd/MM}" + (cobro.Monto != p.SalarioNeto ? $" · ₡{cobro.Monto:N2}" : "")
+                                    : "Pendiente",
                 Fecha         = p.FechaFin,
                 Label         = p.Label,
                 Bruto         = p.SalarioBruto,
@@ -490,7 +504,7 @@ public class ControlLaboralViewModel : BaseViewModel
             });
         }
 
-        foreach (var d in directos)
+        foreach (var d in directos.Where(d => d.PeriodoInicio is not { } pi || !cerradas.Contains(pi)))
         {
             var label = d.Fecha.ToString("dd/MM/yyyy", CrCulture);
             if (!string.IsNullOrWhiteSpace(d.Descripcion))
@@ -527,7 +541,7 @@ public class ControlLaboralViewModel : BaseViewModel
             Historial.Add(item);
 
         var totalAnio = items.Where(i => i.Fecha.Year == anio).Sum(i => i.Monto);
-        HistorialTotalAnio = $"₡{totalAnio:N0}";
+        HistorialTotalAnio = $"₡{totalAnio:N2}";
         OnPropertyChanged(nameof(HistorialTotalAnio));
 
         SinHistorialVisibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -592,8 +606,8 @@ public class ControlLaboralViewModel : BaseViewModel
         ResumenSalarioBruto  = $"₡{c.Bruto:N2}";
         ResumenDeduccionCCSS = $"-₡{c.Deducciones:N2}  ({c.PorcentajeDeduccion:0.##}%)";
         ResumenSalarioNeto   = $"₡{c.Neto:N2}";
-        ResumenAguinaldo     = $"₡{aguinaldo:N0}";
-        ResumenVacaciones    = $"₡{vacaciones:N0}";
+        ResumenAguinaldo     = $"₡{aguinaldo:N2}";
+        ResumenVacaciones    = $"₡{vacaciones:N2}";
         OnPropertyChanged(nameof(ResumenSalarioBase));
 
         NotifyResumen();
@@ -606,7 +620,7 @@ public class ControlLaboralViewModel : BaseViewModel
         {
             PeriodoCerradoVisibility = Visibility.Visible;
             PeriodoAbiertVisibility  = Visibility.Collapsed;
-            PeriodoCerradoTexto      = $"Período cerrado — Neto registrado: ₡{actual.SalarioNeto:N0}";
+            PeriodoCerradoTexto      = $"Período cerrado — Neto registrado: ₡{actual.SalarioNeto:N2}";
         }
         else
         {
@@ -617,6 +631,15 @@ public class ControlLaboralViewModel : BaseViewModel
         OnPropertyChanged(nameof(PeriodoCerradoVisibility));
         OnPropertyChanged(nameof(PeriodoAbiertVisibility));
         OnPropertyChanged(nameof(PeriodoCerradoTexto));
+
+        var ingreso = _db.IngresoDelPeriodo(_uid, _inicio);
+        RegistrarIngresoVisibility  = ingreso is null ? Visibility.Visible : Visibility.Collapsed;
+        IngresoRegistradoVisibility = ingreso is null ? Visibility.Collapsed : Visibility.Visible;
+        IngresoRegistradoTexto      = ingreso is null ? ""
+            : $"Ingreso registrado: ₡{ingreso.Monto:N2} el {ingreso.Fecha:dd/MM/yyyy}";
+        OnPropertyChanged(nameof(RegistrarIngresoVisibility));
+        OnPropertyChanged(nameof(IngresoRegistradoVisibility));
+        OnPropertyChanged(nameof(IngresoRegistradoTexto));
     }
 
     private void NotifyResumen()
@@ -871,7 +894,15 @@ public class ControlLaboralViewModel : BaseViewModel
 
     public void EjecutarRegistroIngreso(DateTime fecha, decimal monto, string descripcion, int? cuentaId)
     {
-        _db.InsertarIngresoLaboralDirecto(_uid, fecha, monto, descripcion, cuentaId);
+        try
+        {
+            _db.InsertarIngresoLaboralDirecto(_uid, fecha, monto, descripcion, cuentaId, periodoInicio: _inicio);
+        }
+        catch (InvalidOperationException ex)
+        {
+            MessageBox.Show(ex.Message, "Control Laboral", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         // Antes aquí se llamaba a ReiniciarRegistrosDia(), que borraba TODOS los registros
         // diarios del mes sin avisar: registrar un pago quincenal se llevaba por delante las
         // horas extra ya cargadas. Registrar un ingreso no debe destruir la bitácora.
@@ -1020,8 +1051,8 @@ public class ControlLaboralViewModel : BaseViewModel
 
         var tipo    = item.EsCierre ? "cierre de período" : "ingreso directo";
         var detalle = item.EsCierre
-            ? $"Período: {item.Label}\nSalario neto: ₡{item.Monto:N0}"
-            : $"Fecha: {item.Label}\nMonto: ₡{item.Monto:N0}";
+            ? $"Período: {item.Label}\nSalario neto: ₡{item.Monto:N2}"
+            : $"Fecha: {item.Label}\nMonto: ₡{item.Monto:N2}";
 
         var res = MessageBox.Show(
             $"¿Eliminar este {tipo}?\n\n{detalle}\n\n" +
@@ -1056,7 +1087,8 @@ public class ControlLaboralViewModel : BaseViewModel
                 [.. Registros],
                 _salarioBrutoCalc,
                 _deduccionesCalc,
-                _salarioNetoCalc);
+                _salarioNetoCalc,
+                _cfg.PorcentajeDeduccion);
             MessageBox.Show($"PDF exportado:\n{ruta}",
                 "Exportar", MessageBoxButton.OK, MessageBoxImage.Information);
         }

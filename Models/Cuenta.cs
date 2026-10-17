@@ -29,8 +29,8 @@ public class Cuenta
     /// <summary>Lo que no está reservado para ninguna meta. Negativo si se gastó dinero apartado.</summary>
     public decimal Libre => SaldoActual - Apartado;
 
-    public string ApartadoDisplay => Apartado > 0 ? $"₡{Apartado:N0}" : "—";
-    public string LibreDisplay    => $"₡{Libre:N0}";
+    public string ApartadoDisplay => Apartado > 0 ? $"₡{Apartado:N2}" : "—";
+    public string LibreDisplay    => $"₡{Libre:N2}";
 
     /// <summary>
     /// La fila "Efectivo" de la pantalla Cuentas: no es una cuenta guardada (Id 0), sino lo que
@@ -46,7 +46,7 @@ public class Cuenta
 
     public string EstadoTexto  => Activa ? "Activa" : "Inactiva";
     public string BancoDisplay => string.IsNullOrWhiteSpace(Banco) ? "—" : Banco;
-    public string SaldoDisplay => $"₡{SaldoActual:N0}";
+    public string SaldoDisplay => $"₡{SaldoActual:N2}";
 
     private static Brush _verde => Temas.Pincel(Temas.Actual.Green);
     private static Brush _rojo  => Temas.Pincel(Temas.Actual.Red);

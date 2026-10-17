@@ -272,7 +272,7 @@
                     <DataGridTemplateColumn Header="MONTO" Width="120">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding Monto, StringFormat='₡{0:N0}'}"
+                                <TextBlock Text="{Binding Monto, StringFormat='₡{0:N2}'}"
                                            FontWeight="SemiBold">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">

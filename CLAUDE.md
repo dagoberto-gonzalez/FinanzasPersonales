@@ -247,6 +247,11 @@ These are enforced in `AppDatabase` (not just in the UI), so breaking them fails
   ends up recorded. A number may not use the same character for grouping and for decimals, and
   thousands groups must be three digits.
 
+- **Money is always shown with two decimals** (`N2`, `₡216.818,38`), on screens, messages, PDFs
+  and the fields pre-filled for editing. Rounding to the colón hid the cents the payroll has, and a
+  field pre-filled rounded lost them when saved. The only `N0` left on purpose: the bar chart's
+  `₡120k` axis and percentages.
+
 ## Accounts and passwords
 
 - **There is no factory admin account.** A fresh install has zero users; the first person to
@@ -278,6 +283,13 @@ viáticos are added to the net. The payroll rounds inconsistently, so comparison
   that and left nothing to compare against; it was replaced by the payslip form.
 - The payslip form starts empty on purpose: pre-filling it with the calculated values would hide
   every difference.
+- **Closing and getting paid are independent.** "Registrar ingreso" stays available after a period
+  is closed (the pay arrives days later) until that period has its income:
+  `IngresoLaboralDirecto.PeriodoInicio` links an income to its period, `IngresoDelPeriodo` finds it
+  (only while its transaction exists — deleting it from Transacciones makes the period pending
+  again), and a second income for the same period is rejected. In the history a linked income is
+  shown in its period's row ("Ingreso" column), never as its own row: that double-counted the
+  money in the year's total.
 
 ## Integrity verification
 
