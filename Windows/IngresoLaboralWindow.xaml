@@ -55,6 +55,14 @@
                 <ComboBox x:Name="CboCuentas"
                           DisplayMemberPath="Nombre"
                           Margin="0,0,0,24"/>
+                <!-- Sin cuentas la lista se abría vacía y parecía rota: cada usuario sólo ve las suyas. -->
+                <Border x:Name="AvisoSinCuentas"
+                        Background="{DynamicResource YellowTintBrush}"
+                        CornerRadius="8" Padding="12,10" Margin="0,0,0,24"
+                        Visibility="Collapsed">
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextBrush}"
+                               Text="Este usuario todavía no tiene cuentas activas. Puedes registrar el ingreso en efectivo, o cancelar, crear la cuenta en Cuentas y volver."/>
+                </Border>
 
                 <!-- Error -->
                 <TextBlock x:Name="TxtError"

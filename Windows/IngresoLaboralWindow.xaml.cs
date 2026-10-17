@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using FinanzasPersonales.Models;
+using FinanzasPersonales.Services;
 
 namespace FinanzasPersonales.Windows;
 
@@ -17,9 +18,16 @@ public partial class IngresoLaboralWindow : Window
     {
         InitializeComponent();
         TxtFecha.Text       = DateTime.Today.ToString("dd/MM/yyyy");
-        TxtMonto.Text       = montoPrelleno > 0 ? montoPrelleno.ToString("F0") : "";
+        // Con céntimos: la planilla los tiene (₡216.818,38) y redondear aquí registraba otro monto.
+        TxtMonto.Text       = montoPrelleno > 0 ? montoPrelleno.ToString("N2") : "";
         TxtDescripcion.Text = descripcionPrellena;
-        CboCuentas.ItemsSource = cuentas;
+        var lista = cuentas.ToList();
+        CboCuentas.ItemsSource = lista;
+        if (lista.Count == 0)
+        {
+            CboCuentas.Visibility      = Visibility.Collapsed;
+            AvisoSinCuentas.Visibility = Visibility.Visible;
+        }
     }
 
     private void BtnConfirmar_Click(object sender, RoutedEventArgs e)
@@ -33,8 +41,9 @@ public partial class IngresoLaboralWindow : Window
             return;
         }
 
-        if (!decimal.TryParse(TxtMonto.Text.Replace(",", "."), NumberStyles.Any,
-            CultureInfo.InvariantCulture, out var monto) || monto <= 0)
+        // Dinero entiende "216.818,38" (como se rellena) y "216818.38"; el parser de antes cambiaba
+        // la coma por punto y leía el primero como 216,81838.
+        if (!Dinero.TryParse(TxtMonto.Text, out var monto) || monto <= 0)
         {
             MostrarError("El monto debe ser un número mayor a cero.");
             return;
