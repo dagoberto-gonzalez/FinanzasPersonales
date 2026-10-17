@@ -263,7 +263,7 @@ public class Bloque2D1Tests
 
         var vm = new ViewModels.CuentasViewModel(t.Db, t.UsuarioId);
         vm.Seleccionada     = vm.Cuentas.Single(c => !c.EsEfectivo);
-        Assert.Equal("100.000", vm.EditSaldoInicial);   // se precarga formateado
+        Assert.Equal("100.000,00", vm.EditSaldoInicial);   // se precarga formateado, con céntimos
 
         vm.EditSaldoInicial = "200.000";
         vm.GuardarCambiosCommand.Execute(null);

@@ -15,7 +15,8 @@ public static class PdfLaboralService
         List<RegistroDiaLaboral>  registros,
         decimal                   salarioBruto,
         decimal                   deducciones,
-        decimal                   salarioNeto)
+        decimal                   salarioNeto,
+        decimal                   porcentajeDeduccion)
     {
         var ruta = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -77,9 +78,9 @@ public static class PdfLaboralService
 
                         Fila("Valor de la hora",   $"₡{salarioPorHora:N2}");
                         Fila("Jornada semanal",    $"{jornadaSemanal} horas");
-                        Fila("Salario bruto",       $"₡{salarioBruto:N0}", Colors.Black);
-                        Fila("Deducción CCSS (10.67%)", $"₡{deducciones:N0}", Colors.Red.Darken1);
-                        Fila("Salario neto",        $"₡{salarioNeto:N0}", Colors.Green.Darken1);
+                        Fila("Salario bruto",       $"₡{salarioBruto:N2}", Colors.Black);
+                        Fila($"Deducción CCSS ({porcentajeDeduccion:0.##} %)", $"₡{deducciones:N2}", Colors.Red.Darken1);
+                        Fila("Salario neto",        $"₡{salarioNeto:N2}", Colors.Green.Darken1);
                     });
 
                     // ── Detalle de horas ──────────────────────────────────────
@@ -113,7 +114,7 @@ public static class PdfLaboralService
                         Fila("Horas dobles (+100%)",        $"{horasDobles:N1} h");
                         Fila("Días ausencia con goce",      $"{diasAusGoce}");
                         Fila("Días ausencia sin goce",      $"{diasAusSin}");
-                        Fila("Viáticos",                   $"₡{viaticos:N0}");
+                        Fila("Viáticos",                   $"₡{viaticos:N2}");
                     });
 
                     // ── Registros diarios ─────────────────────────────────────
@@ -165,7 +166,7 @@ public static class PdfLaboralService
                                 Cell($"{r.HorasExtraDiurnas:N1}");
                                 Cell($"{r.HorasExtraNocturnas:N1}");
                                 Cell($"{r.HorasDobles:N1}");
-                                Cell($"₡{r.Viaticos:N0}");
+                                Cell($"₡{r.Viaticos:N2}");
                                 Cell($"{r.TotalHoras:N1}");
                             }
                         });

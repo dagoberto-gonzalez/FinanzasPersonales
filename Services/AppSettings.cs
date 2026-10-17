@@ -7,5 +7,5 @@ public static class AppSettings
     public static string Moneda { get; set; } = "₡";
 
     /// <summary>Formatea un monto con el símbolo de moneda y separadores de miles.</summary>
-    public static string FormatMonto(decimal monto) => $"{Moneda}{monto:N0}";
+    public static string FormatMonto(decimal monto) => $"{Moneda}{monto:N2}";
 }

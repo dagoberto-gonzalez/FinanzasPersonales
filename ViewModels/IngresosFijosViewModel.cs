@@ -100,8 +100,8 @@ public class IngresosFijosViewModel : BaseViewModel
     private decimal _totalPendiente;
     private decimal _totalRecibido;
 
-    public string TotalPendienteTexto => $"₡{_totalPendiente:N0}";
-    public string TotalRecibidoTexto  => $"₡{_totalRecibido:N0}";
+    public string TotalPendienteTexto => $"₡{_totalPendiente:N2}";
+    public string TotalRecibidoTexto  => $"₡{_totalRecibido:N2}";
 
     // ── Comandos ──────────────────────────────────────────────────────────────
     public ICommand GuardarCommand        { get; }
@@ -248,7 +248,7 @@ public class IngresosFijosViewModel : BaseViewModel
         _editandoId     = i.Id;
         _nombreOriginal = i.Nombre;
         Nombre          = i.Nombre;
-        Monto           = i.Monto % 1 == 0 ? i.Monto.ToString("N0") : i.Monto.ToString("N2");
+        Monto           = i.Monto.ToString("N2");
         DiaIngreso      = i.DiaIngreso.ToString();
         DiaIngreso2     = i.DiaIngreso2 > 0 ? i.DiaIngreso2.ToString() : string.Empty;
 

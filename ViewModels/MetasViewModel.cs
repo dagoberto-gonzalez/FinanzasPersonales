@@ -37,7 +37,7 @@ public class MetaAhorroVm : BaseViewModel
 
     /// <summary>Cuánto se puede apartar todavía: lo libre de la cuenta.</summary>
     public string LibreTexto => _parent.LibreDe(Meta.CuentaId) is { } libre
-        ? $"Libre en {Meta.CuentaNombre}: ₡{libre:N0}"
+        ? $"Libre en {Meta.CuentaNombre}: ₡{libre:N2}"
         : "";
 
     public Visibility ConCuentaVisibility => Meta.TieneCuenta ? Visibility.Visible : Visibility.Collapsed;
@@ -45,7 +45,7 @@ public class MetaAhorroVm : BaseViewModel
 
     /// <summary>Metas de antes de D5: lo que tenía su contador se apartará al elegir la cuenta.</summary>
     public string SinCuentaTexto => Meta.MontoAnterior > 0
-        ? $"Elige la cuenta donde está este dinero. Los ₡{Meta.MontoAnterior:N0} que tenía registrados se apartarán en ella."
+        ? $"Elige la cuenta donde está este dinero. Los ₡{Meta.MontoAnterior:N2} que tenía registrados se apartarán en ella."
         : "Elige la cuenta donde está este dinero.";
 
     public ObservableCollection<Cuenta> Cuentas         => _parent.Cuentas;
@@ -269,7 +269,7 @@ public class MetasViewModel : BaseViewModel
     {
         var res = MessageBox.Show(
             $"¿Eliminar la meta \"{vm.Nombre}\"?\n\n" +
-            (vm.Apartado > 0 ? $"Los ₡{vm.Apartado:N0} apartados vuelven a quedar libres en la cuenta. " : "") +
+            (vm.Apartado > 0 ? $"Los ₡{vm.Apartado:N2} apartados vuelven a quedar libres en la cuenta. " : "") +
             "Lo que ya se usó de ella se conserva como gasto.",
             "Confirmar eliminación", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (res != MessageBoxResult.Yes) return;

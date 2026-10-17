@@ -22,8 +22,8 @@ public class TarjetaCredito
 
     public decimal SaldoDisponible => LimiteCredito - SaldoUsado;
 
-    public string SaldoUsadoTexto     => $"₡{SaldoUsado:N0}";
-    public string ConsumoPeriodoTexto => $"₡{ConsumoPeriodo:N0}";
+    public string SaldoUsadoTexto     => $"₡{SaldoUsado:N2}";
+    public string ConsumoPeriodoTexto => $"₡{ConsumoPeriodo:N2}";
     public double  PorcentajeUso   => LimiteCredito > 0
         ? Math.Min(100.0, (double)(SaldoUsado / LimiteCredito) * 100.0) : 0;
 

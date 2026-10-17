@@ -201,7 +201,7 @@
                             <DataGridTemplateColumn Header="INGRESOS" Width="130">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding Ingresos, StringFormat='₡{0:N0}'}"
+                                        <TextBlock Text="{Binding Ingresos, StringFormat='₡{0:N2}'}"
                                                    Foreground="{DynamicResource GreenBrush}"
                                                    FontWeight="SemiBold"/>
                                     </DataTemplate>
@@ -211,7 +211,7 @@
                             <DataGridTemplateColumn Header="GASTOS" Width="130">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding Gastos, StringFormat='₡{0:N0}'}"
+                                        <TextBlock Text="{Binding Gastos, StringFormat='₡{0:N2}'}"
                                                    Foreground="{DynamicResource RedBrush}"
                                                    FontWeight="SemiBold"/>
                                     </DataTemplate>
@@ -219,11 +219,11 @@
                             </DataGridTemplateColumn>
 
                             <DataGridTextColumn Header="BALANCE MES"
-                                                Binding="{Binding Balance, StringFormat='₡{0:N0}'}"
+                                                Binding="{Binding Balance, StringFormat='₡{0:N2}'}"
                                                 Width="130"/>
 
                             <DataGridTextColumn Header="BALANCE ACUM."
-                                                Binding="{Binding BalanceAcumulado, StringFormat='₡{0:N0}'}"
+                                                Binding="{Binding BalanceAcumulado, StringFormat='₡{0:N2}'}"
                                                 Width="140"/>
 
                             <DataGridTextColumn Header="TRANS."

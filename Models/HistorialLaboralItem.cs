@@ -16,9 +16,12 @@ public class HistorialLaboralItem
     /// <summary>Estado del comprobante de pago frente a lo calculado. Sólo en cierres.</summary>
     public string   Comprobante      { get; set; } = "";
 
-    public string BrutoDisplay       => EsCierre ? $"₡{Bruto:N0}"        : "—";
-    public string DeduccionesDisplay => EsCierre ? $"-₡{Deducciones:N0}" : "—";
+    /// <summary>Si la quincena ya se cobró: "✓ 16/10", o "Pendiente". Sólo en cierres.</summary>
+    public string   Ingreso          { get; set; } = "";
+
+    public string BrutoDisplay       => EsCierre ? $"₡{Bruto:N2}"        : "—";
+    public string DeduccionesDisplay => EsCierre ? $"-₡{Deducciones:N2}" : "—";
     public string TipoDisplay        => EsCierre ? "Cierre período"       : "Ingreso directo";
-    public string MontoDisplay       => $"₡{Monto:N0}";
-    public string BalanceDisplay     => $"₡{BalanceAcumulado:N0}";
+    public string MontoDisplay       => $"₡{Monto:N2}";
+    public string BalanceDisplay     => $"₡{BalanceAcumulado:N2}";
 }

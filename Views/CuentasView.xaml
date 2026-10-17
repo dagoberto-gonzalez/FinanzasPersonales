@@ -193,9 +193,9 @@
 
                             <DataGridTextColumn Header="BANCO"
                                                 Binding="{Binding BancoDisplay}"
-                                                Width="80"/>
+                                                Width="150"/>
 
-                            <DataGridTemplateColumn Header="SALDO" Width="105">
+                            <DataGridTemplateColumn Header="SALDO" Width="130">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding SaldoDisplay}"
@@ -209,10 +209,10 @@
                             <!-- D5: lo reservado en metas sigue en la cuenta; LIBRE es lo que no tiene destino. -->
                             <DataGridTextColumn Header="EN METAS"
                                                 Binding="{Binding ApartadoDisplay}"
-                                                Width="85"/>
+                                                Width="110"/>
                             <DataGridTextColumn Header="LIBRE"
                                                 Binding="{Binding LibreDisplay}"
-                                                Width="105"/>
+                                                Width="130"/>
 
                             <DataGridTemplateColumn Header="ESTADO" Width="70">
                                 <DataGridTemplateColumn.CellTemplate>

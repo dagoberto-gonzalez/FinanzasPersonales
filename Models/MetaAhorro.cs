@@ -35,7 +35,7 @@ public class MetaAhorro
     public double ProgresoPercent =>
         MontoObjetivo > 0 ? Math.Min(100.0, (double)(Apartado / MontoObjetivo) * 100.0) : 0;
 
-    public string ProgresoTexto => $"₡{Apartado:N0} / ₡{MontoObjetivo:N0}";
+    public string ProgresoTexto => $"₡{Apartado:N2} / ₡{MontoObjetivo:N2}";
 }
 
 /// <summary>Un movimiento de una meta. Positivo aparta; negativo usa o libera.</summary>

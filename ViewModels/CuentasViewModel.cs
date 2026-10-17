@@ -38,7 +38,7 @@ public class CuentasViewModel : BaseViewModel
                 EditTipo         = value.Tipo;
                 EditBanco        = value.Banco;
                 EditActiva       = value.Activa;
-                EditSaldoInicial = value.SaldoInicial.ToString("N0");
+                EditSaldoInicial = value.SaldoInicial.ToString("N2");
             }
             MensajeError = string.Empty;
             MensajeOk    = string.Empty;
@@ -223,7 +223,7 @@ public class CuentasViewModel : BaseViewModel
             return;
         }
 
-        TransOk    = $"Transferidos ₡{monto:N0} de {_transOrigen.Nombre} a {_transDestino.Nombre}.";
+        TransOk    = $"Transferidos ₡{monto:N2} de {_transOrigen.Nombre} a {_transDestino.Nombre}.";
         TransMonto = string.Empty;
         TransNota  = string.Empty;
         TransFecha = DateTime.Today;

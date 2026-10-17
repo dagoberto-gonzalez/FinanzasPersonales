@@ -494,15 +494,25 @@
                         </Border>
 
                         <!-- Acciones -->
-                        <StackPanel Visibility="{Binding PeriodoAbiertVisibility}" Margin="0,0,0,8">
+                        <!-- Cobrar y cerrar son independientes: el pago llega después de cerrar. -->
+                        <Border CornerRadius="6" Padding="10,8" Margin="0,0,0,12"
+                                Background="{DynamicResource AccentTintBrush}"
+                                Visibility="{Binding IngresoRegistradoVisibility}">
+                            <TextBlock Text="{Binding IngresoRegistradoTexto}"
+                                       Foreground="{DynamicResource AccentLightBrush}"
+                                       FontSize="11" TextWrapping="Wrap"/>
+                        </Border>
+                        <StackPanel Margin="0,0,0,8">
                             <Button Content="Registrar ingreso"
                                     Style="{StaticResource PrimaryButton}"
                                     Click="BtnRegistrarIngreso_Click"
+                                    Visibility="{Binding RegistrarIngresoVisibility}"
                                     HorizontalAlignment="Stretch"
                                     Padding="12,9" Margin="0,0,0,8"/>
                             <Button Content="Cerrar período"
                                     Style="{StaticResource PrimaryButton}"
                                     Command="{Binding CerrarPeriodoCommand}"
+                                    Visibility="{Binding PeriodoAbiertVisibility}"
                                     HorizontalAlignment="Stretch"
                                     Padding="12,9"/>
                         </StackPanel>
@@ -742,6 +752,7 @@
                             <DataGridTextColumn Header="Deducciones"     Binding="{Binding DeduccionesDisplay}" Width="105"/>
                             <DataGridTextColumn Header="Neto / Monto"    Binding="{Binding MontoDisplay}" Width="105"/>
                             <DataGridTextColumn Header="Acumulado"       Binding="{Binding BalanceDisplay}" Width="105"/>
+                            <DataGridTextColumn Header="Ingreso"         Binding="{Binding Ingreso}" Width="110"/>
                             <DataGridTextColumn Header="Comprobante"     Binding="{Binding Comprobante}" Width="140"/>
                             <DataGridTemplateColumn Header="Acciones" Width="160">
                                 <DataGridTemplateColumn.CellTemplate>

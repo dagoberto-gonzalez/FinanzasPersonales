@@ -145,17 +145,17 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="LÍMITE" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
-                                    <TextBlock Text="{Binding LimiteCredito, StringFormat='₡{0:N0}'}"
+                                    <TextBlock Text="{Binding LimiteCredito, StringFormat='₡{0:N2}'}"
                                                FontSize="12" FontWeight="SemiBold"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1">
                                     <TextBlock Text="SE DEBE" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
-                                    <TextBlock Text="{Binding SaldoUsado, StringFormat='₡{0:N0}'}"
+                                    <TextBlock Text="{Binding SaldoUsado, StringFormat='₡{0:N2}'}"
                                                Foreground="{DynamicResource RedBrush}" FontWeight="SemiBold" FontSize="12"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="DISPONIBLE" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
-                                    <TextBlock Text="{Binding SaldoDisponible, StringFormat='₡{0:N0}'}"
+                                    <TextBlock Text="{Binding SaldoDisponible, StringFormat='₡{0:N2}'}"
                                                Foreground="{DynamicResource GreenBrush}" FontWeight="SemiBold" FontSize="12"/>
                                 </StackPanel>
                             </Grid>
@@ -263,7 +263,7 @@
                             <TextBlock Foreground="{DynamicResource TextMutedBrush}" FontSize="12"
                                        TextWrapping="Wrap" Margin="0,0,0,2">
                                 <Run Text="Se debe: "/>
-                                <Run Text="{Binding Seleccionada.SaldoUsado, StringFormat='₡{0:N0}'}"
+                                <Run Text="{Binding Seleccionada.SaldoUsado, StringFormat='₡{0:N2}'}"
                                      Foreground="{DynamicResource RedBrush}" FontWeight="SemiBold"/>
                             </TextBlock>
 
@@ -272,7 +272,7 @@
                             <TextBlock Foreground="{DynamicResource TextMutedBrush}" FontSize="12"
                                        TextWrapping="Wrap" Margin="0,0,0,14">
                                 <Run Text="Consumido en este período: "/>
-                                <Run Text="{Binding Seleccionada.ConsumoPeriodo, StringFormat='₡{0:N0}'}"
+                                <Run Text="{Binding Seleccionada.ConsumoPeriodo, StringFormat='₡{0:N2}'}"
                                      FontWeight="SemiBold"/>
                             </TextBlock>
 
@@ -341,7 +341,7 @@
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
                                 <DataGridTextColumn Header="Monto"
-                                                    Binding="{Binding Monto, StringFormat='₡{0:N0}'}"
+                                                    Binding="{Binding Monto, StringFormat='₡{0:N2}'}"
                                                     Width="140">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">

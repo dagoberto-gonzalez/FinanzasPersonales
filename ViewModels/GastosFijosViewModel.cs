@@ -124,8 +124,8 @@ public class GastosFijosViewModel : BaseViewModel
     private decimal _totalPendiente;
     private decimal _totalPagado;
 
-    public string TotalPendienteTexto => $"₡{_totalPendiente:N0}";
-    public string TotalPagadoTexto    => $"₡{_totalPagado:N0}";
+    public string TotalPendienteTexto => $"₡{_totalPendiente:N2}";
+    public string TotalPagadoTexto    => $"₡{_totalPagado:N2}";
 
     // ── Comandos ──────────────────────────────────────────────────────────────
     public ICommand GuardarCommand    { get; }
@@ -281,7 +281,7 @@ public class GastosFijosViewModel : BaseViewModel
         _editandoId     = g.Id;
         _nombreOriginal = g.Nombre;
         Nombre          = g.Nombre;
-        Monto           = g.Monto % 1 == 0 ? g.Monto.ToString("N0") : g.Monto.ToString("N2");
+        Monto           = g.Monto.ToString("N2");
         DiaVencimiento  = g.DiaVencimiento.ToString();
         DiaVencimiento2 = g.DiaVencimiento2 > 0 ? g.DiaVencimiento2.ToString() : string.Empty;
         MensajeError    = string.Empty;

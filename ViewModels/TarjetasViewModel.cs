@@ -32,7 +32,7 @@ public class TarjetasViewModel : BaseViewModel
             if (value is not null)
             {
                 EditNombre = value.Nombre;
-                EditLimite = value.LimiteCredito.ToString("N0");
+                EditLimite = value.LimiteCredito.ToString("N2");
                 EditCierre = value.DiaCierre.ToString();
                 EditPago   = value.DiaPago.ToString();
                 AbonoMonto = string.Empty;

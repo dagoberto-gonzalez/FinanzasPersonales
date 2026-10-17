@@ -141,7 +141,7 @@ public class PresupuestoTests
 
         var vm = new DashboardViewModel(t.Db, t.UsuarioId);
 
-        Assert.Contains("₡40.000 de ₡100.000", vm.PresupuestoUsoTexto);
+        Assert.Contains("₡40.000,00 de ₡100.000,00", vm.PresupuestoUsoTexto);
     }
 
     [Fact]
